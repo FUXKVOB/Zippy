@@ -17,11 +17,11 @@ pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str)
     let root_js = gen.render_to_js(&nodes, "el");
 
     let runtime_imports = if gen.has_each() {
-        r#"import { signal, effect, on, reconcileEach, clearAfter } from "@zippy/runtime";"#
+        r#"import { signal, computed, effect, on, reconcileEach, clearAfter } from "@zippy/runtime";"#
     } else if gen.has_events() {
-        r#"import { signal, effect, on, clearAfter } from "@zippy/runtime";"#
+        r#"import { signal, computed, effect, on, clearAfter } from "@zippy/runtime";"#
     } else {
-        r#"import { signal, effect, clearAfter } from "@zippy/runtime";"#
+        r#"import { signal, computed, effect, clearAfter } from "@zippy/runtime";"#
     };
 
     let js = format!(
@@ -30,9 +30,9 @@ r#"{imports}
 
 export default function ZippyComponent(props) {{
   const __onMount = [];
-  const __onDestroy = [];
+  const __onDestroy = new Set();
   function onMount(fn) {{ __onMount.push(fn); }}
-  function onDestroy(fn) {{ __onDestroy.push(fn); }}
+  function onDestroy(fn) {{ __onDestroy.add(fn); }}
 
   {body_script}
 
