@@ -172,6 +172,7 @@ struct Gen {
     comps: Vec<CompInfo>,
     ifs: Vec<IfInfo>,
     eachs: Vec<EachInfo>,
+    current_each: Option<usize>,
 }
 
 struct CompInfo {
@@ -192,6 +193,10 @@ struct EachInfo {
     index: Option<String>,
     idx: usize,
     body_html: String,
+    events: Vec<(String, String)>,
+    binds: Vec<(String, String)>,
+    toggles: Vec<(String, String)>,
+    exprs: Vec<String>,
 }
 
 impl Gen {
@@ -206,6 +211,7 @@ impl Gen {
             comps: Vec::new(),
             ifs: Vec::new(),
             eachs: Vec::new(),
+            current_each: None,
         }
     }
 
@@ -251,6 +257,7 @@ impl Gen {
                         html.push('<');
                         html.push_str(tag);
                         for a in attrs {
+                            let is_in_each = self.current_each.is_some();
                             match &a.value {
                                 AttrValue::Static(v) => html.push_str(&format!(" {}=\"{}\"", a.name, v)),
                                 AttrValue::Dynamic(e) => {
@@ -258,19 +265,42 @@ impl Gen {
                                     html.push_str(&format!(" {}=\"${{{}}}\"", a.name, v));
                                 }
                                 AttrValue::Event(ev, handler) => {
-                                    let ei = self.events.len();
-                                    self.events.push((ev.clone(), handler.clone()));
+                                    let target = if let Some(each_idx) = self.current_each {
+                                        &mut self.eachs[each_idx].events
+                                    } else {
+                                        &mut self.events
+                                    };
+                                    let ei = target.len();
+                                    target.push((ev.clone(), handler.clone()));
                                     html.push_str(&format!(" data-zippy-evt{}", ei));
                                 }
                                 AttrValue::Bind(prop, expr) => {
-                                    let bi = self.binds.len();
-                                    self.binds.push((prop.clone(), expr.clone()));
-                                    html.push_str(&format!(" data-zippy-bind=\"{}\"", bi));
+                                    let target = if let Some(each_idx) = self.current_each {
+                                        &mut self.eachs[each_idx].binds
+                                    } else {
+                                        &mut self.binds
+                                    };
+                                    let bi = target.len();
+                                    target.push((prop.clone(), expr.clone()));
+                                    if is_in_each {
+                                        html.push_str(&format!(" data-zippy-bind-each=\"{}\"", bi));
+                                    } else {
+                                        html.push_str(&format!(" data-zippy-bind=\"{}\"", bi));
+                                    }
                                 }
                                 AttrValue::ClassToggle(class_name, expr) => {
-                                    let ti = self.toggles.len();
-                                    self.toggles.push((class_name.clone(), expr.clone()));
-                                    html.push_str(&format!(" data-zippy-toggle=\"{}\"", ti));
+                                    let target = if let Some(each_idx) = self.current_each {
+                                        &mut self.eachs[each_idx].toggles
+                                    } else {
+                                        &mut self.toggles
+                                    };
+                                    let ti = target.len();
+                                    target.push((class_name.clone(), expr.clone()));
+                                    if is_in_each {
+                                        html.push_str(&format!(" data-zippy-toggle-each=\"{}\"", ti));
+                                    } else {
+                                        html.push_str(&format!(" data-zippy-toggle=\"{}\"", ti));
+                                    }
                                 }
                             }
                         }
@@ -327,14 +357,22 @@ impl Gen {
                 }
                 Node::EachBlock { list, item, index, body } => {
                     let idx = self.eachs.len();
-                    let body_html = self.render(body, Mode::Raw); // loop vars are plain values
                     self.eachs.push(EachInfo {
                         list: list.clone(),
                         item: item.clone(),
                         index: index.clone(),
                         idx,
-                        body_html,
+                        body_html: String::new(),
+                        events: Vec::new(),
+                        binds: Vec::new(),
+                        toggles: Vec::new(),
+                        exprs: Vec::new(),
                     });
+                    let prev = self.current_each;
+                    self.current_each = Some(idx);
+                    let body_html = self.render(body, Mode::Raw);
+                    self.current_each = prev;
+                    self.eachs[idx].body_html = body_html;
                     html.push_str(&format!(
                         "<!--zippy-each-{}--><div data-zippy-each=\"{}\"></div>",
                         idx, idx
@@ -482,14 +520,18 @@ impl Gen {
 
             // destructure so user's variable names match body_html (which uses ${item}, ${idx})
             let destructure = match &info.index {
-                Some(idx_var) => format!("{{ item: {}, index: {} }}", info.item, idx_var),
+                Some(ref idx_var) => format!("{{ item: {}, index: {} }}", info.item, idx_var),
                 None => format!("{{ item: {} }}", info.item),
             };
 
-            code.push_str(&format!(
-                "  let __eachDispose{0};\n",
-                idx
-            ));
+            let has_wiring = !info.events.is_empty() || !info.binds.is_empty() || !info.toggles.is_empty();
+            let each_wiring = if has_wiring {
+                self.render_each_wiring(info)
+            } else {
+                String::new()
+            };
+
+            code.push_str(&format!("  let __eachDispose{0};\n", idx));
             code.push_str(&format!(
                 "  effect(() => {{\n    \
                    if (__eachDispose{0}) __eachDispose{0}();\n    \
@@ -499,9 +541,9 @@ impl Gen {
                      const __e = document.createElement('div');\n    \
                      __e.innerHTML = `{3}`;\n    \
                      return __e.firstElementChild || __e;\n    \
-                   }});\n  \
+                   }}{4});\n  \
                  }});\n",
-                idx, list_expr, destructure, info.body_html
+                idx, list_expr, destructure, info.body_html, each_wiring
             ));
             code.push_str(&format!(
                 "  onDestroy(() => {{ if (__eachDispose{}) __eachDispose{}(); }});\n",
@@ -509,6 +551,57 @@ impl Gen {
             ));
         }
 
+        code
+    }
+
+    fn render_each_wiring(&self, info: &EachInfo) -> String {
+        let mut code = String::new();
+        let destructure = match &info.index {
+            Some(idx_var) => format!("item: {}, index: {}", info.item, idx_var),
+            None => format!("item: {}", info.item),
+        };
+
+        code.push_str(&format!(
+            ", (el, {{ {} }}) => {{\n      const __eachCleanup = new Set();\n",
+            destructure
+        ));
+
+        // Events inside the each block
+        for (i, (ev, handler)) in info.events.iter().enumerate() {
+            code.push_str(&format!(
+                "      const __btn{} = el.querySelector('[data-zippy-evt{}]');\n      \
+                 if (__btn{}) on(__btn{}, '{}', {}, __eachCleanup);\n",
+                i, i, i, i, ev, handler
+            ));
+        }
+
+        // Binds inside the each block
+        for (i, (prop, expr)) in info.binds.iter().enumerate() {
+            code.push_str(&format!(
+                "      const __bind{} = el.querySelector('[data-zippy-bind-each=\"{}\"]');\n      \
+                 if (__bind{}) {{\n        \
+                   __bind{}.{} = {};\n        \
+                   __bind{}.addEventListener('input', () => {{ {}.val = __bind{}.{}; }});\n        \
+                   effect(() => {{ __bind{}.{} = {}.val; }});\n      \
+                 }}\n",
+                i, i, i, i, prop, wrap_val(expr),
+                i, expr, i, prop,
+                i, prop, expr
+            ));
+        }
+
+        // Class toggles inside the each block
+        for (i, (class_name, expr)) in info.toggles.iter().enumerate() {
+            code.push_str(&format!(
+                "      effect(() => {{\n        \
+                   const __n = el.querySelector('[data-zippy-toggle-each=\"{}\"]');\n        \
+                   if (__n) __n.classList.toggle('{}', {});\n      \
+                 }});\n",
+                i, class_name, wrap_val(expr)
+            ));
+        }
+
+        code.push_str("      return () => { for (const fn of __eachCleanup) fn(); };\n    }");
         code
     }
 
@@ -623,6 +716,32 @@ mod tests {
         let scoped = scope_css("h1 { color: red; }", "abc123");
         assert!(scoped.contains("[data-z-abc123]"));
         assert!(scoped.contains("h1"));
+    }
+
+    #[test]
+    fn test_generate_each_event() {
+        let js = generate(
+            "let items = signal([1,2,3]); function remove(x) {}",
+            "{#each items as item}<button @click={() => remove(item)}>X</button>{/each}",
+            "",
+        );
+        // Should include initFn with destructured item
+        assert!(js.contains("item: item"), "should contain destructured item");
+        // Should use __eachCleanup for per-item events
+        assert!(js.contains("__eachCleanup"), "should contain __eachCleanup");
+        // Should wire event inside initFn with __eachCleanup
+        assert!(js.contains("on(__btn0, 'click', () => remove(item), __eachCleanup)"),
+                "should wire event with __eachCleanup");
+    }
+
+    #[test]
+    fn test_generate_each_event_with_index() {
+        let js = generate(
+            "let items = signal(['a','b']);",
+            "{#each items as item, idx}<button @click={() => console.log(idx)}>{item}</button>{/each}",
+            "",
+        );
+        assert!(js.contains("index: idx"));
     }
 
     #[test]

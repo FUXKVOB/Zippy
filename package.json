@@ -7,7 +7,8 @@
     "dev": "bun run packages/zippy-cli/src/dev.ts",
     "build": "bun run packages/zippy-cli/src/build.ts",
     "test": "bun test",
-    "typecheck": "bun run tsc --noEmit"
+    "typecheck": "bun run tsc --noEmit",
+    "postinstall": "node scripts/workspace-links.cjs"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

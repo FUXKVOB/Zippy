@@ -1,0 +1,13 @@
+<style>
+  .hero { text-align: center; padding: 40px 0; }
+  .hero h2 { font-size: 2em; margin-bottom: 10px; }
+  .hero p { color: #666; font-size: 1.1em; }
+</style>
+
+<template>
+  <div class="hero">
+    <h2>Welcome!</h2>
+    <p>This is a demo SPA built with Zippy.</p>
+    <p>Check out the <a href="#/counter">counter</a> or <a href="#/todo">todo list</a>.</p>
+  </div>
+</template>

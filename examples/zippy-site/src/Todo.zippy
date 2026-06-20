@@ -1,0 +1,49 @@
+<script>
+  let todos = signal([]);
+  let input = signal("");
+
+  const add = () => {
+    const text = input.val.trim();
+    if (!text) return;
+    todos.val = [...todos.val, { id: Date.now(), text, done: false }];
+    input.val = "";
+  };
+
+  const toggle = (todo) => {
+    todos.val = todos.val.map(t => t.id === todo.id ? { ...t, done: !t.done } : t);
+  };
+  const remove = (todo) => {
+    todos.val = todos.val.filter(t => t.id !== todo.id);
+  };
+</script>
+
+<style>
+  .todo { max-width: 400px; }
+  .add-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .add-row input { flex: 1; padding: 8px; font-size: 1em; }
+  .add-row button { padding: 8px 16px; cursor: pointer; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; cursor: pointer; }
+  .item .text { flex: 1; }
+  .del-btn { color: #e44; cursor: pointer; border: none; background: none; font-size: 1.1em; }
+</style>
+
+<template>
+  <div class="todo">
+    <h2>Todo List</h2>
+    <div class="add-row">
+      <input bind:value={input} placeholder="What needs to be done?" />
+      <button @click={add}>Add</button>
+    </div>
+    <div>
+      {#each todos as todo}
+        <div class="item">
+          <span class="text" @click={() => toggle(todo)}>{todo.text}</span>
+          <button @click={() => remove(todo)}>x</button>
+        </div>
+      {/each}
+    </div>
+    {#if todos.length === 0}
+      <p>Nothing yet. Add a todo above!</p>
+    {/if}
+  </div>
+</template>

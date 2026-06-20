@@ -1,0 +1,34 @@
+<script>
+  import { createRouter } from "@zippy/runtime";
+  import Home from "./Home.zippy";
+  import Counter from "./Counter.zippy";
+  import Todo from "./Todo.zippy";
+
+  let router;
+  onMount(() => {
+    router = createRouter({
+      "/": Home,
+      "/counter": Counter,
+      "/todo": Todo,
+    });
+    router.mount(el.querySelector("#outlet"));
+  });
+  onDestroy(() => router?.unmount());
+</script>
+
+<style>
+  h1 { color: #333; }
+  nav { margin-bottom: 20px; padding: 10px 0; border-bottom: 1px solid #eee; }
+  nav a { margin-right: 16px; color: #646cff; font-weight: 500; }
+  #outlet { padding: 10px 0; }
+</style>
+
+<template>
+  <h1>Zippy SPA</h1>
+  <nav>
+    <a href="#/">Home</a>
+    <a href="#/counter">Counter</a>
+    <a href="#/todo">Todo</a>
+  </nav>
+  <div id="outlet"></div>
+</template>

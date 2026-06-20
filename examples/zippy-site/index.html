@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zippy SPA Demo</title>
+  <script type="module" src="/examples/zippy-site/App.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+    nav a { margin-right: 12px; text-decoration: none; color: #646cff; }
+    nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import App from "/examples/zippy-site/App.js";
+    const app = document.getElementById("app");
+    const cmp = App({});
+    cmp.mount(app);
+  </script>
+</body>
+</html>

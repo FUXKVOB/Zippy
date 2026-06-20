@@ -1,0 +1,21 @@
+<script>
+  let count = signal(0);
+</script>
+
+<style>
+  .counter { text-align: center; padding: 30px 0; }
+  .counter .val { font-size: 3em; font-weight: bold; margin: 20px 0; }
+  .counter button { font-size: 1.2em; margin: 0 8px; padding: 8px 20px; cursor: pointer; }
+</style>
+
+<template>
+  <div class="counter">
+    <h2>Counter</h2>
+    <div class="val">{count}</div>
+    <div>
+      <button @click={() => count.val--}>-</button>
+      <button @click={() => count.val++}>+</button>
+      <button @click={() => count.val = 0}>Reset</button>
+    </div>
+  </div>
+</template>
