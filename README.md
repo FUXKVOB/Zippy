@@ -1,4 +1,4 @@
-![Zippy](logo.png)
+<img src="logo.png" alt="Zippy" width="150">
 
 **Zippy** — реактивный фронтенд-фреймворк. Свой компилятор (Rust), сигналы, scoped CSS, `{#if}`/`{#each}`, двусторонний binding.
 
