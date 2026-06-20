@@ -17,9 +17,21 @@ fn main() {
     let source = fs::read_to_string(input_path)
         .expect("Failed to read input file");
 
-    let component = parser::parse(&source).expect("Failed to parse .zippy file");
+    let component = match parser::parse(&source) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error parsing .zippy file: {}", e);
+            std::process::exit(1);
+        }
+    };
     let ext = if component.script_lang == "ts" { ".ts" } else { ".js" };
-    let output = codegen::generate_with_lang(&component.script, &component.template, &component.style, &component.script_lang);
+    let (output, types) = match codegen::generate_with_lang(&component.script, &component.template, &component.style, &component.script_lang) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Error generating code: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     let output_path = args.get(2)
         .map(|p| p.clone())
@@ -29,5 +41,9 @@ fn main() {
         });
 
     fs::write(&output_path, output).expect("Failed to write output");
-    println!("Compiled {} -> {}", input_path, output_path);
+    
+    let dts_path = output_path.replace(ext, ".d.ts");
+    fs::write(&dts_path, types).expect("Failed to write .d.ts file");
+
+    println!("Compiled {} -> {} and {}", input_path, output_path, dts_path);
 }

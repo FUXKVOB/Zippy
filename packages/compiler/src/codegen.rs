@@ -1,12 +1,13 @@
 use crate::template::{self, AttrValue, Node};
 
-pub fn generate(script: &str, template: &str, style: &str) -> String {
-    generate_with_lang(script, template, style, "js")
-}
+    #[allow(dead_code)]
+    pub fn generate(script: &str, template: &str, style: &str) -> Result<(String, String), String> {
+        generate_with_lang(script, template, style, "js")
+    }
 
-pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str) -> String {
+pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str) -> Result<(String, String), String> {
     let ext = if lang == "ts" { ".ts" } else { ".js" };
-    let nodes = template::parse_template(template).expect("Failed to parse template");
+    let nodes = template::parse_template(template)?;
     let info = extract_imports(script, ext);
     let hash = compute_hash(template);
     let scoped_style = scope_css(style, &hash);
@@ -14,18 +15,15 @@ pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str)
 
     let root_js = gen.render_to_js(&nodes, "el");
 
-    let _has_lifecycle = info.body.contains("onMount(") || info.body.contains("onDestroy(");
-    let _lang = lang;
-
     let runtime_imports = if gen.has_each() {
-        r#"import { signal, effect, on, reconcileEach } from "@zippy/runtime";"#
+        r#"import { signal, effect, on, reconcileEach, clearAfter } from "@zippy/runtime";"#
     } else if gen.has_events() {
-        r#"import { signal, effect, on } from "@zippy/runtime";"#
+        r#"import { signal, effect, on, clearAfter } from "@zippy/runtime";"#
     } else {
-        r#"import { signal, effect } from "@zippy/runtime";"#
+        r#"import { signal, effect, clearAfter } from "@zippy/runtime";"#
     };
 
-    format!(
+    let js = format!(
 r#"{imports}
 {runtime_imports}
 
@@ -59,8 +57,46 @@ export default function ZippyComponent(props) {{
         style_teardown = if scoped_style.is_empty() { String::new() } else { "\n    __style.remove();".into() },
         root_js = root_js,
         unmount_comp = gen.render_unmount_comp(),
-    )
+    );
+
+    let types = generate_types(&info.body);
+
+    Ok((js, types))
 }
+
+fn generate_types(body: &str) -> String {
+    let mut props = Vec::new();
+    for line in body.lines() {
+        if let Some(start) = line.find("props.") {
+            let rest = &line[start + 6..];
+            let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
+            if !name.is_empty() && !props.contains(&name.to_string()) {
+                props.push(name.to_string());
+            }
+        }
+    }
+
+    let props_def = if props.is_empty() {
+        "".to_string()
+    } else {
+        props.iter()
+            .map(|p| format!("  {}: any;", p))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+r#"import {{ ZippyComponent }} from "@zippy/runtime";
+
+export interface Props {{
+{props_def}
+}}
+
+declare const Component: (props: Props) => ZippyComponent;
+export default Component;
+"#)
+}
+
 
 // ---------------------------------------------------------------------------
 // Import extraction
@@ -111,26 +147,35 @@ fn scope_css(css: &str, hash: &str) -> String {
     if css.is_empty() { return String::new(); }
     let attr = format!("[data-z-{}]", hash);
     let mut out = String::new();
-    for line in css.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('}') {
-            out.push_str(line);
-            out.push('\n');
-            continue;
+    
+    // Simple but more robust approach: 
+    // We split by '}' to get rule blocks, then handle each selector.
+    for block in css.split('}') {
+        let parts: Vec<&str> = block.splitn(2, '{').collect();
+        if parts.len() < 2 { 
+            if !block.trim().is_empty() {
+                out.push_str(block);
+                out.push('}');
+            }
+            continue; 
         }
-        if trimmed.contains('{') || trimmed.ends_with(',') {
-            let prefix = trimmed.trim_end_matches(|c| c == '{' || c == ',');
-            let suffix = &trimmed[prefix.len()..];
-            let prefixed = prefix.split(',')
-                .map(|sel| format!("{} {}", attr, sel.trim()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push_str(&format!("{}{}{}", "  ".repeat(line.len() - line.trim_start().len()), prefixed, suffix));
-            out.push('\n');
-        } else {
-            out.push_str(line);
-            out.push('\n');
-        }
+        
+        let selectors = parts[0].trim();
+        let body = parts[1];
+        
+        let scoped_selectors = selectors.split(',')
+            .map(|s| {
+                let s = s.trim();
+                if s.is_empty() { return "".to_string(); }
+                // If it starts with @ (at-rule), don't scope
+                if s.starts_with('@') { return s.to_string(); }
+                format!("{} {}", attr, s)
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        
+        out.push_str(&format!("{} {{ {}}} \n", scoped_selectors, body.trim()));
     }
     out
 }
@@ -154,6 +199,7 @@ fn wrap_val(expr: &str) -> String {
 // Generator
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 struct Gen {
     component_names: Vec<String>,
     hash: String,
@@ -164,6 +210,7 @@ struct Gen {
     current_each: Option<usize>,
 }
 
+#[allow(dead_code)]
 struct CompInfo {
     name: String,
     static_props: Vec<(String, String)>,
@@ -171,10 +218,12 @@ struct CompInfo {
     children_html: String,
 }
 
+#[allow(dead_code)]
 struct IfInfo {
     idx: usize,
 }
 
+#[allow(dead_code)]
 struct EachInfo {
     list: String,
     item: String,
@@ -323,32 +372,50 @@ impl Gen {
                     let if_idx = self.ifs.len();
                     self.ifs.push(IfInfo { idx: if_idx });
                     
-                    js.push_str(&format!("  const {} = document.createElement('div');\n  {}.setAttribute('data-zippy-if', '{}');\n  {}.appendChild({});\n", 
-                        id, parent_var, if_idx, parent_var, id));
+                    js.push_str(&format!(
+                        "  const {} = document.createComment('zippy-if-{}');\n  {}.appendChild({});\n", 
+                        id, if_idx, parent_var, id));
                     
                     js.push_str(&format!(
-                        "  effect(() => {{\n    {}.innerHTML = '';\n", id));
+                        "  let __if_current_branch{} = -1;\n  effect(() => {{\n", id));
                     
                     for (bi, (cond, body)) in branches.iter().enumerate() {
                         let branch_var = format!("__b{}", bi);
+                        let cond_val = wrap_val(cond);
                         if bi == 0 {
                             js.push_str(&format!(
-                                "    if ({}) {{\n      const {} = document.createElement('div');\n", 
-                                wrap_val(cond), branch_var));
+                                "    if ({}) {{\n", cond_val));
                         } else {
                             js.push_str(&format!(
-                                "    else if ({}) {{\n      const {} = document.createElement('div');\n", 
-                                wrap_val(cond), branch_var));
+                                "    else if ({}) {{\n", cond_val));
                         }
+                        
+                        js.push_str(&format!(
+                            "      if (__if_current_branch{} !== {}) {{\n", id, bi));
+                        js.push_str(&format!(
+                            "        clearAfter({});\n", id));
+                        js.push_str(&format!(
+                            "        const {} = document.createDocumentFragment();\n", branch_var));
                         js.push_str(&self.render_to_js(body, &branch_var));
-                        js.push_str(&format!("      {}.appendChild({});\n    }}\n", id, branch_var));
+                        js.push_str(&format!(
+                            "        {}.appendChild({});\n        __if_current_branch{} = {};\n      }}\n    }}\n", 
+                            id, branch_var, id, bi));
                     }
+                    
                     if !fallback.is_empty() {
                         let fallback_var = "__bf";
-                        js.push_str(&format!("    else {{\n      const {} = document.createElement('div');\n", fallback_var));
+                        js.push_str(&format!(
+                            "    else {{\n      if (__if_current_branch{} !== -2) {{\n", id));
+                        js.push_str(&format!(
+                            "        clearAfter({});\n", id));
+                        js.push_str(&format!(
+                            "        const {} = document.createDocumentFragment();\n", fallback_var));
                         js.push_str(&self.render_to_js(fallback, fallback_var));
-                        js.push_str(&format!("      {}.appendChild({});\n    }}\n", id, fallback_var));
+                        js.push_str(&format!(
+                            "        {}.appendChild({});\n        __if_current_branch{} = -2;\n      }}\n    }}\n", 
+                            id, fallback_var, id));
                     }
+                    
                     js.push_str("  });\n");
                 }
                 Node::EachBlock { list, item, index, key, body } => {
@@ -368,10 +435,10 @@ impl Gen {
                         key: key.clone(), idx: each_idx,
                         events: Vec::new(), binds: Vec::new(), toggles: Vec::new(), exprs: Vec::new(),
                     });
-
+ 
                     js.push_str(&format!(
-                        "  const {} = document.createElement('div');\n  {}.setAttribute('data-zippy-each', '{}');\n  {}.appendChild({});\n",
-                        id, parent_var, each_idx, parent_var, id
+                        "  const {} = document.createComment('zippy-each-{}');\n  {}.appendChild({});\n",
+                        id, each_idx, parent_var, id
                     ));
                     
                     let prev_each = self.current_each;
@@ -381,12 +448,13 @@ impl Gen {
                     let init_body_js = self.render_each_init_js(&self.eachs[each_idx], item, index.as_deref());
                     
                     self.current_each = prev_each;
-
+ 
                     js.push_str(&format!(
-                        "  let __eachDispose{0};\n  effect(() => {{\n    if (__eachDispose{0}) __eachDispose{0}();\n    __eachDispose{0} = reconcileEach({1}, {2}, {3}, ({4}) => {{\n      const __root = document.createElement('div');\n{5}\n      return __root.firstElementChild || __root;\n    }}, (el, {4}) => {{\n      const __eachCleanup = [];\n      const on = (element, event, handler, cleanupArray) => {{\n        element.addEventListener(event, handler);\n        cleanupArray.push(() => element.removeEventListener(event, handler));\n      }};\n{6}\n      return () => {{ __eachCleanup.forEach(fn => fn()); }};\n    }});\n  }});\n  onDestroy(() => {{ if (__eachDispose{0}) __eachDispose{0}(); }});\n",
+                        "  let __eachDispose{0};\n  effect(() => {{\n    if (__eachDispose{0}) __eachDispose{0}();\n    __eachDispose{0} = reconcileEach({1}, {2}, {3}, ({4}) => {{\n      const __root = document.createDocumentFragment();\n{5}\n      return __root.firstElementChild || __root;\n    }}, (el, {4}) => {{\n      const __eachCleanup = [];\n      const on = (element, event, handler, cleanupArray) => {{\n        element.addEventListener(event, handler);\n        cleanupArray.push(() => element.removeEventListener(event, handler));\n      }};\n{6}\n      return () => {{ __eachCleanup.forEach(fn => fn()); }};\n    }});\n  }});\n  onDestroy(() => {{ if (__eachDispose{0}) __eachDispose{0}(); }});\n",
                         each_idx, id, list_expr, key_fn, destructure, create_body_js, init_body_js
                     ));
                 }
+
             }
         }
         js
@@ -529,6 +597,7 @@ impl Gen {
     }
 }
 
+#[allow(dead_code)]
 fn is_void(tag: &str) -> bool {
     matches!(tag, "br" | "hr" | "img" | "input" | "meta" | "link" | "area" | "base" | "col" | "embed" | "source" | "track" | "wbr")
 }
@@ -575,11 +644,11 @@ mod tests {
 
     #[test]
     fn test_generate_basic() {
-        let js = generate(
+        let (js, _) = generate(
             "let count = signal(0);",
             "<p>{count}</p>",
             "",
-        );
+        ).unwrap();
         assert!(js.contains("signal"));
         assert!(js.contains("effect"));
         assert!(js.contains("count.val"));
@@ -588,32 +657,32 @@ mod tests {
 
     #[test]
     fn test_generate_bind() {
-        let js = generate(
+        let (js, _) = generate(
             "let x = signal('');",
             "<input bind:value={x} />",
             "",
-        );
+        ).unwrap();
         assert!(js.contains("addEventListener('input'"));
         assert!(js.contains("x.val"));
     }
 
     #[test]
     fn test_generate_each_index() {
-        let js = generate(
+        let (js, _) = generate(
             "let items = signal([1,2,3]);",
             "{#each items as item, i}<li>{i}: {item}</li>{/each}",
             "",
-        );
+        ).unwrap();
         assert!(js.contains("reconcileEach"));
     }
 
     #[test]
     fn test_generate_if() {
-        let js = generate(
+        let (js, _) = generate(
             "let show = signal(true);",
             "{#if show}<p>visible</p>{/if}",
             "",
-        );
+        ).unwrap();
         assert!(js.contains("show.val"));
     }
 

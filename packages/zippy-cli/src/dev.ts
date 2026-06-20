@@ -8,7 +8,6 @@ const ROOT = join(import.meta.dir, "..", "..", "..");
 const COMPILER = join(ROOT, "packages", "compiler", "target", "debug", "zippy-compiler.exe");
 const PORT = parseInt(process.env.PORT || "3000");
 
-// Ensure workspace packages are resolvable via node_modules
 function ensureWorkspaceLinks() {
   const runtimeLink = join(ROOT, "node_modules", "@zippy", "runtime");
   if (!existsSync(runtimeLink)) {
@@ -29,6 +28,7 @@ console.log(`  Root: ${ROOT}`);
 console.log(`  URL:  http://localhost:${PORT}`);
 
 let bundleCache = new Map<string, { data: string; mtime: number }>();
+let sockets = new Set<Bun.ServerWebSocket>();
 
 watch(ROOT, { recursive: true }, (ev, filename) => {
   if (!filename?.endsWith(".zippy")) return;
@@ -38,6 +38,12 @@ watch(ROOT, { recursive: true }, (ev, filename) => {
     execSync(`"${COMPILER}" "${input}" "${output}"`, { stdio: "pipe", timeout: 10000 });
     bundleCache.delete(output);
     console.log(`  Recompiled ${filename}`);
+    
+    // Notify clients about the update
+    const url = new URL(output).pathname; // Simplified
+    for (const ws of sockets) {
+      ws.send(JSON.stringify({ type: 'update', file: filename }));
+    }
   } catch (e) {
     console.error(`  Error: ${filename}`, (e as Error).message);
   }
@@ -45,12 +51,14 @@ watch(ROOT, { recursive: true }, (ev, filename) => {
 
 serve({
   port: PORT,
-  async fetch(req) {
+  fetch(req, server) {
+    // Upgrade to WebSocket if requested
+    if (server.upgrade(req)) return;
+
     const url = new URL(req.url);
     let filePath = join(ROOT, url.pathname);
     if (!extname(filePath)) filePath = join(filePath, "index.html");
 
-    // Bundle JS files to resolve bare imports (e.g. @zippy/runtime)
     if (filePath.endsWith(".js") && existsSync(filePath)) {
       const src = Bun.file(filePath);
       const mtime = (await src.stat()).mtimeMs;
@@ -92,6 +100,17 @@ serve({
     if (f.size <= 0) return new Response("Not Found", { status: 404 });
     return new Response(f);
   },
+  websocket: {
+    open(ws) {
+      sockets.add(ws);
+    },
+    close(ws) {
+      sockets.delete(ws);
+    },
+    message(ws, msg) {
+      // No-op
+    }
+  }
 });
 
 console.log(`  Ready.`);

@@ -305,52 +305,52 @@ fn parse_if_block(stream: &mut Stream) -> Result<Node, String> {
     let mut fallback: Vec<Node> = Vec::new();
 
     loop {
-        match stream.peek() {
-            None => return Err(stream.err("Unclosed {#if}")),
-            Some('{') => {
-                stream.next();
-                match stream.peek() {
-                    Some(':') => {
-                        stream.next();
-                        let mut kw = String::new();
-                        while let Some(c) = stream.peek() {
-                            if c == '}' { stream.next(); break; }
-                            kw.push(c); stream.next();
-                        }
-                        let kw = kw.trim();
-                        if kw == "else" {
-                            fallback = parse_nodes(stream, &["/if"])?;
-                            if stream.peek() == Some('{') { stream.next(); }
-                            while let Some(c) = stream.peek() {
-                                if c == '}' { stream.next(); break; }
+                        match stream.peek() {
+                            None => return Err(stream.err("Unclosed {#if}")),
+                            Some('{') => {
                                 stream.next();
+                                match stream.peek() {
+                                    Some(':') => {
+                                        stream.next();
+                                        let mut kw = String::new();
+                                        while let Some(c) = stream.peek() {
+                                            if c == '}' { stream.next(); break; }
+                                            kw.push(c); stream.next();
+                                        }
+                                        let kw = kw.trim();
+                                        if kw == "else" {
+                                            fallback = parse_nodes(stream, &["/if"])?;
+                                            if stream.peek() == Some('{') { stream.next(); }
+                                            while let Some(c) = stream.peek() {
+                                                if c == '}' { stream.next(); break; }
+                                                stream.next();
+                                            }
+                                            break;
+                                        } else if kw.starts_with("else if") {
+                                            let cond = kw[7..].trim().to_string();
+                                            let body = parse_nodes(stream, &["/if", ":else", ":else if"])?;
+                                            branches.push((cond, body));
+                                            continue;
+                                        } else {
+                                            return Err(stream.err(&format!("Unknown block keyword: {}", kw)));
+                                        }
+                                    }
+                                    Some('/') => {
+                                        stream.next();
+                                        let mut end = String::new();
+                                        while let Some(c) = stream.peek() {
+                                            if c == '}' { stream.next(); break; }
+                                            end.push(c); stream.next();
+                                        }
+                                        if end.trim() != "if" { return Err(stream.err("Expected {/if}")); }
+                                        break;
+                                    }
+                                    _ => return Err(stream.err("Expected {:else} or {/if}")),
+                                }
                             }
-                            break;
-                        } else if kw.starts_with("else if") {
-                            let cond = kw[7..].trim().to_string();
-                            let body = parse_nodes(stream, &["/if", ":else", ":else if"])?;
-                            branches.push((cond, body));
-                            continue;
-                        } else {
-                            return Err(stream.err(&format!("Unknown block keyword: {}", kw)));
+                            Some(_) => break,
                         }
-                    }
-                    Some('/') => {
-                        stream.next();
-                        let mut end = String::new();
-                        while let Some(c) = stream.peek() {
-                            if c == '}' { stream.next(); break; }
-                            end.push(c); stream.next();
-                        }
-                        if end.trim() != "if" { return Err(stream.err("Expected {/if}")); }
-                        break;
-                    }
-                    _ => return Err(stream.err("Expected {:else} or {/if}")),
-                }
-            }
-            Some(_) => break,
-            None => break,
-        }
+
     }
 
     Ok(Node::IfBlock { branches, fallback })

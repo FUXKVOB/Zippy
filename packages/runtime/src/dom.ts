@@ -2,8 +2,21 @@ export function createElement(tag: string): HTMLElement {
   return document.createElement(tag);
 }
 
+export function createComment(text: string): Comment {
+  return document.createComment(text);
+}
+
 export function setText(el: HTMLElement, text: string): void {
   el.textContent = text;
+}
+
+export function clearAfter(anchor: Node): void {
+  let next = anchor.nextSibling;
+  while (next) {
+    const toRemove = next;
+    next = next.nextSibling;
+    toRemove.remove();
+  }
 }
 
 export function setAttr(el: HTMLElement, name: string, value: string): void {

@@ -4,8 +4,10 @@ export interface EachEntry<T> {
   index: number;
 }
 
+import { clearAfter } from './dom';
+
 export function reconcileEach<T>(
-  container: HTMLElement,
+  container: Node,
   items: T[],
   keyFn: (item: T, index: number) => string | number,
   createFn: (entry: EachEntry<T>) => HTMLElement,
@@ -46,7 +48,8 @@ export function reconcileEach<T>(
       marker.el.remove();
     }
 
-    container.replaceChildren(frag);
+    clearAfter(container);
+    container.after(frag);
     markers.clear();
     for (const [k, v] of newMarkers) markers.set(k, v);
   }
