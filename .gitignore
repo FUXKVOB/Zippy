@@ -3,3 +3,7 @@ node_modules/
 target/
 dist/
 *.js
+test-results/
+playwright-report/
+dev-out.log
+dev-err.log
