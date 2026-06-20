@@ -497,7 +497,7 @@ impl Gen {
                             "        const {} = document.createDocumentFragment();\n", branch_var));
                         js.push_str(&self.render_to_js(body, &branch_var));
                         js.push_str(&format!(
-                            "        {}.appendChild({});\n        __if_current_branch{} = {};\n      }}\n    }}\n", 
+                            "        {}.after({});\n        __if_current_branch{} = {};\n      }}\n    }}\n", 
                             id, branch_var, id, bi));
                     }
                     
@@ -511,7 +511,7 @@ impl Gen {
                             "        const {} = document.createDocumentFragment();\n", fallback_var));
                         js.push_str(&self.render_to_js(fallback, fallback_var));
                         js.push_str(&format!(
-                            "        {}.appendChild({});\n        __if_current_branch{} = -2;\n      }}\n    }}\n", 
+                            "        {}.after({});\n        __if_current_branch{} = -2;\n      }}\n    }}\n", 
                             id, fallback_var, id));
                     }
                     
@@ -564,7 +564,7 @@ impl Gen {
                     
                     let promise_expr = self.wrap_val(promise);
                     js.push_str(&format!(
-                        "  effect(() => {{\n    const p = {};\n    if (p && typeof p.then === 'function') {{\n      {}.val = {{ status: 'loading' }};\n      p.then(val => {}.val = {{ status: 'success', val }})\n       .catch(err => {}.val = {{ status: 'error', err }});\n    }} else {{\n      {}.val = {{ status: 'success', val: p }};\n    }}\n  }});\n",
+                        "  effect(() => {{\n    const p = {};\n    if (p && typeof p.then === 'function') {{\n      {}.val = {{ status: 'loading' }};\n      p.then(val => {}.val = {{ status: 'success', val }})\n       .catch(err => {}.val = {{ status: 'error', err }});\n    }} else if (p != null) {{\n      {}.val = {{ status: 'success', val: p }};\n    }}\n    // else: keep current state (value is null/undefined, not ready yet)\n  }});\n",
                         promise_expr, state_sig, state_sig, state_sig, state_sig
                     ));
                     
@@ -583,7 +583,7 @@ impl Gen {
                         "      if (__await_current_branch{} !== 0) {{\n        clearAfter({});\n        const __b0 = document.createDocumentFragment();\n", wrapper_id, wrapper_id));
                     js.push_str(&self.render_to_js(loading, "__b0"));
                     js.push_str(&format!(
-                        "        {}.appendChild(__b0);\n        __await_current_branch{} = 0;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                        "        {}.after(__b0);\n        __await_current_branch{} = 0;\n      }}\n    }}\n", wrapper_id, wrapper_id));
                         
                     let (val_name, success_body) = success;
                     js.push_str(&format!(
@@ -599,7 +599,7 @@ impl Gen {
                         self.plain_vars.remove(val_name);
                     }
                     js.push_str(&format!(
-                        "        {}.appendChild(__b1);\n        __await_current_branch{} = 1;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                        "        {}.after(__b1);\n        __await_current_branch{} = 1;\n      }}\n    }}\n", wrapper_id, wrapper_id));
                         
                     if let Some((err_name, error_body)) = error {
                         js.push_str(&format!(
@@ -615,7 +615,7 @@ impl Gen {
                             self.plain_vars.remove(err_name);
                         }
                         js.push_str(&format!(
-                            "        {}.appendChild(__b2);\n        __await_current_branch{} = 2;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                            "        {}.after(__b2);\n        __await_current_branch{} = 2;\n      }}\n    }}\n", wrapper_id, wrapper_id));
                     }
                     
                     js.push_str("  });\n");

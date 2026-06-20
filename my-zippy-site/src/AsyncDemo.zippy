@@ -1,5 +1,5 @@
 <script>
-  let dataPromise = signal(null);
+  let dataPromise = signal();
   let attempts = signal(0);
 
   function loadData(shouldFail) {
