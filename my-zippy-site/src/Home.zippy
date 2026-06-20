@@ -39,7 +39,18 @@
 
 <style>
   .home { max-width: 960px; margin: 0 auto; padding: 48px 32px 64px; }
-  .hero { padding: 32px 0 48px; }
+  .hero { padding: 32px 0 48px; text-align: center; }
+  .hero-logo {
+    width: 120px; height: 120px;
+    border-radius: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 0 60px rgba(100, 108, 255, 0.4);
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
   .hero h1 {
     font-size: 48px;
     font-weight: 800;
@@ -146,6 +157,7 @@
 <template>
   <div class="home">
     <section class="hero">
+      <img src="/my-zippy-site/logo.png" alt="Zippy logo" class="hero-logo" />
       <span class="badge">v0.0.1 - Rust compiler</span>
       <h1>The reactive framework that compiles to native speed.</h1>
       <p>Signals, scoped CSS, async blocks, named slots and SPA routing - all in a tiny, Rust-compiled bundle. No virtual DOM, no runtime overhead.</p>

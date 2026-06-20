@@ -57,11 +57,11 @@
     color: var(--text);
     text-decoration: none;
   }
-  .brand-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), #42b883);
-    box-shadow: 0 0 12px var(--accent);
+  .brand-logo {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 0 16px rgba(100, 108, 255, 0.4);
   }
   .nav { display: flex; align-items: center; gap: 4px; }
   .nav a {
@@ -85,13 +85,19 @@
   }
   .footer a { color: var(--text-dim); text-decoration: none; }
   .footer a:hover { color: var(--accent); }
+  .footer-logo {
+    width: 16px; height: 16px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 4px;
+  }
 </style>
 
 <template>
   <div class="app">
     <header class="topbar">
       <a href="/" class="brand" data-link>
-        <span class="brand-dot"></span>
+        <img src="/my-zippy-site/logo.png" alt="Zippy" class="brand-logo" />
         <span>Zippy</span>
       </a>
       <nav class="nav">
@@ -103,6 +109,6 @@
       </nav>
     </header>
     <main class="outlet" id="outlet"></main>
-    <footer class="footer">Built with <a href="https://github.com/FUXKVOB/Zippy" target="_blank">Zippy</a> - signals, scoped CSS, history routing</footer>
+    <footer class="footer"><img src="/my-zippy-site/logo.png" alt="" class="footer-logo" />Built with <a href="https://github.com/FUXKVOB/Zippy" target="_blank">Zippy</a> - signals, scoped CSS, history routing</footer>
   </div>
 </template>
