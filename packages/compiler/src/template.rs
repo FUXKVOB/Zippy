@@ -66,6 +66,7 @@ pub enum Node {
         list: String,
         item: String,
         index: Option<String>,
+        key: Option<String>,
         body: Vec<Node>,
     },
 }
@@ -369,6 +370,18 @@ fn parse_each_block(stream: &mut Stream) -> Result<Node, String> {
     }
     let list = parts[0].trim().to_string();
     let rest2 = parts[2..].join(" ");
+    let (rest2, key) = if let Some(key_pos) = rest2.find(" key=") {
+        let before_key = rest2[..key_pos].trim().to_string();
+        let key_part = rest2[key_pos + 5..].trim();
+        let key = if key_part.starts_with('{') && key_part.ends_with('}') {
+            Some(key_part[1..key_part.len()-1].trim().to_string())
+        } else {
+            return Err(stream.err("key={expr} expected"));
+        };
+        (before_key, key)
+    } else {
+        (rest2, None)
+    };
     let (item, index) = if let Some(pos) = rest2.find(',') {
         (rest2[..pos].trim().to_string(), Some(rest2[pos+1..].trim().to_string()))
     } else {
@@ -387,7 +400,7 @@ fn parse_each_block(stream: &mut Stream) -> Result<Node, String> {
         }
     }
 
-    Ok(Node::EachBlock { list, item, index, body })
+    Ok(Node::EachBlock { list, item, index, key, body })
 }
 
 fn parse_text(stream: &mut Stream) -> Node {
