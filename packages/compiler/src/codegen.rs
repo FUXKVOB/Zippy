@@ -9,12 +9,19 @@ pub fn generate(script: &str, template: &str, style: &str) -> String {
 
     let root_html = gen.render(&nodes, Mode::Normal);
 
-    let has_lifecycle = info.body.contains("onMount(") || info.body.contains("onDestroy(");
+    let _has_lifecycle = info.body.contains("onMount(") || info.body.contains("onDestroy(");
+
+    let runtime_imports = if gen.has_each() {
+        r#"import { signal, effect, on, reconcileEach } from "@zippy/runtime";"#
+    } else if gen.has_events() {
+        r#"import { signal, effect, on } from "@zippy/runtime";"#
+    } else {
+        r#"import { signal, effect } from "@zippy/runtime";"#
+    };
 
     format!(
 r#"{imports}
-import {{ signal, effect }} from "@zippy/runtime";
-{lifestyle_import}
+{runtime_imports}
 
 export default function ZippyComponent(props) {{
   const __onMount = [];
@@ -42,7 +49,7 @@ export default function ZippyComponent(props) {{
 }}
 "#,
         imports = info.imports,
-        lifestyle_import = String::new(),
+        runtime_imports = runtime_imports,
         body_script = info.body,
         hash = hash,
         style_setup = render_style(&scoped_style),
@@ -352,11 +359,11 @@ impl Gen {
     fn render_wiring(&self) -> String {
         let mut code = String::new();
 
-        // Events
+        // Events — tracked via on() for cleanup on unmount
         for (i, (ev, handler)) in self.events.iter().enumerate() {
             code.push_str(&format!(
                 "  const __btn{} = el.querySelector('[data-zippy-evt{}]');\n  \
-                 if (__btn{}) __btn{}.addEventListener('{}', {});\n",
+                 if (__btn{}) on(__btn{}, '{}', {}, __onDestroy);\n",
                 i, i, i, i, ev, handler
             ));
         }
@@ -464,36 +471,45 @@ impl Gen {
             ));
         }
 
-        // Each blocks
+        // Each blocks — keyed reconciliation via reconcileEach
         for info in &self.eachs {
             let idx = info.idx;
-            let fn_name = format!("__each_{}", idx);
+            let list_expr = wrap_val(&info.list);
 
-            let map_params = match &info.index {
-                Some(idx_var) => format!("{}, {}", info.item, idx_var),
-                None => info.item.clone(),
+            // destructure so user's variable names match body_html (which uses ${item}, ${idx})
+            let destructure = match &info.index {
+                Some(idx_var) => format!("{{ item: {}, index: {} }}", info.item, idx_var),
+                None => format!("{{ item: {} }}", info.item),
             };
 
             code.push_str(&format!(
-                "  const {} = () => {{\n    \
-                   const __list = {};\n    \
-                   return __list.map(({}) => `{}`).join('');\n  \
-                 }};\n",
-                fn_name, wrap_val(&info.list), map_params, info.body_html
+                "  let __eachDispose{0};\n",
+                idx
             ));
-
             code.push_str(&format!(
                 "  effect(() => {{\n    \
-                   const __parent = el.querySelector('[data-zippy-each=\"{}\"]');\n    \
-                   if (!__parent) return;\n    \
-                   __parent.innerHTML = {}();\n  \
+                   if (__eachDispose{0}) __eachDispose{0}();\n    \
+                   const __c{0} = el.querySelector('[data-zippy-each=\"{0}\"]');\n    \
+                   if (!__c{0}) return;\n    \
+                   __eachDispose{0} = reconcileEach(__c{0}, {1}, (item, i) => i, ({2}) => {{\n    \
+                     const __e = document.createElement('div');\n    \
+                     __e.innerHTML = `{3}`;\n    \
+                     return __e.firstElementChild || __e;\n    \
+                   }});\n  \
                  }});\n",
-                idx, fn_name
+                idx, list_expr, destructure, info.body_html
+            ));
+            code.push_str(&format!(
+                "  onDestroy(() => {{ if (__eachDispose{}) __eachDispose{}(); }});\n",
+                idx, idx
             ));
         }
 
         code
     }
+
+    fn has_each(&self) -> bool { !self.eachs.is_empty() }
+    fn has_events(&self) -> bool { !self.events.is_empty() }
 
     fn render_unmount_comp(&self) -> String {
         if self.comps.is_empty() { return String::new(); }

@@ -1,0 +1,13 @@
+<script>
+  let items = signal(["a", "b", "c"]);
+  const addItem = () => items.val = [...items.val, "x"];
+</script>
+
+<template>
+  <button @click={addItem}>Add</button>
+  <ul>
+    {#each items as item, i}
+      <li>{i}: {item}</li>
+    {/each}
+  </ul>
+</template>

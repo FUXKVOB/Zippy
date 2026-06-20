@@ -1,4 +1,4 @@
-import { effect } from './reactivity.js';
+import { effect } from './reactivity';
 
 export interface ZippyComponent {
   el: HTMLElement;
@@ -16,13 +16,17 @@ export function createComponent(
   slot: HTMLElement,
 ): ZippyComponent {
   const instance = factory(props);
-  instance.mount(slot);
-
+  const disposes: (() => void)[] = [];
   for (const [key, getter] of dynamicProps) {
-    effect(() => {
+    disposes.push(effect(() => {
       instance.update({ [key]: getter() });
-    });
+    }));
   }
-
+  instance.mount(slot);
+  const origUnmount = instance.unmount.bind(instance);
+  instance.unmount = () => {
+    origUnmount();
+    for (const d of disposes) d();
+  };
   return instance;
 }

@@ -26,3 +26,13 @@ export function insertAfter(anchor: Node, node: Node): void {
 export function removeAll(parent: Node): void {
   while (parent.firstChild) parent.removeChild(parent.firstChild);
 }
+
+export function on(
+  el: HTMLElement,
+  event: string,
+  handler: EventListener,
+  cleanup: Set<() => void>,
+): void {
+  el.addEventListener(event, handler);
+  cleanup.add(() => el.removeEventListener(event, handler));
+}
