@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from "child_process";
-import { join, relative, dirname, basename } from "path";
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, copyFileSync, unlinkSync } from "fs";
+import { join, relative, dirname, basename, extname } from "path";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, copyFileSync, unlinkSync, renameSync, rmdirSync } from "fs";
+import { createHash } from "crypto";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -64,6 +65,23 @@ async function build(dir: string) {
     }
   }
 
+  console.log("\n Extracting CSS...");
+  const cssBlocks: string[] = [];
+  const cssRegex = /const __style = document\.createElement\('style'\);\s*__style\.textContent = `([^`]+)`;\s*document\.head\.append\(__style\);/g;
+  for (const jsFile of walk(outDir).filter(f => f.endsWith(".js") && !f.endsWith(".min.js"))) {
+    const content = readFileSync(jsFile, "utf-8");
+    const matches = [...content.matchAll(cssRegex)];
+    if (matches.length > 0) {
+      for (const m of matches) cssBlocks.push(m[1]);
+      const cleaned = content.replace(cssRegex, "/* CSS moved to styles.css */");
+      writeFileSync(jsFile, cleaned);
+    }
+  }
+  if (cssBlocks.length > 0) {
+    writeFileSync(join(outDir, "styles.css"), cssBlocks.join("\n\n"));
+    console.log(` Extracted ${cssBlocks.length} CSS block(s) -> styles.css`);
+  }
+
   for (const file of entries) {
     if (file.endsWith(".zippy")) continue;
     const rel = relative(dir, file);
@@ -86,16 +104,83 @@ async function build(dir: string) {
     process.exit(1);
   }
 
+  // Remove intermediate compiled files (subdirectories) — only the bundled output + extracted CSS + html are needed
+  console.log("\n Cleaning intermediate files...");
+  const subdirs = readdirSync(outDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => join(outDir, d.name));
+  for (const dir of subdirs) {
+    for (const f of walk(dir)) {
+      try { unlinkSync(f); } catch {}
+    }
+    try { rmdirSync(dir); } catch {}
+  }
+
+  console.log("\n Hashing assets...");
+  const manifest: Record<string, string> = {};
+  const hashTargets = walk(outDir).filter(f => {
+    if (f.endsWith(".html")) return false;
+    if (f.endsWith(".json")) return false;
+    if (f.endsWith(".d.ts")) return false;
+    if (f.endsWith(".map")) return false;
+    return f.endsWith(".js") || f.endsWith(".css");
+  });
+
+  for (const file of hashTargets) {
+    const content = readFileSync(file);
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 8);
+    const ext = extname(file);
+    const base = basename(file, ext);
+    const newName = `${base}.${hash}${ext}`;
+    const newPath = join(dirname(file), newName);
+    if (file !== newPath) {
+      renameSync(file, newPath);
+    }
+    const relPath = relative(outDir, newPath).replace(/\\/g, "/");
+    manifest[basename(file)] = relPath;
+  }
+
+  writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+  console.log(` Generated manifest.json (${Object.keys(manifest).length} entries)`);
+
   const htmlPath = join(outDir, "index.html");
   if (existsSync(htmlPath)) {
     let html = readFileSync(htmlPath, "utf-8");
-    const bundledName = basename(entryPoint).replace(/\.js$/, ".js");
-    html = html.replace(
-      /<script[^>]*src="[^"]*"[^>]*><\/script>/g,
-      `<script type="module" src="./${bundledName}"></script>`
-    );
+
+    // Extract original paths from script src and inline imports, then rewrite using manifest
+    const originalSrcs = new Set<string>();
+    const srcRegex = /<script([^>]*)\s+src="([^"]+)"([^>]*)><\/script>/g;
+    for (const m of html.matchAll(srcRegex)) {
+      originalSrcs.add(m[2]);
+    }
+    const importRegex = /import\s+\w+\s+from\s+["']([^"']+)["']/g;
+    for (const m of html.matchAll(importRegex)) {
+      originalSrcs.add(m[1]);
+    }
+
+    for (const orig of originalSrcs) {
+      const filename = basename(orig);
+      const hashed = manifest[filename];
+      if (hashed) {
+        html = html.split(orig).join(`./${hashed}`);
+      }
+    }
+
+    // Ensure CSS links are present in <head>
+    const cssEntries = Object.entries(manifest).filter(([k]) => k.endsWith(".css"));
+    if (cssEntries.length > 0) {
+      const cssLinks = cssEntries
+        .map(([, v]) => `<link rel="stylesheet" href="./${v}">`)
+        .join("\n  ");
+      if (html.includes("</head>")) {
+        html = html.replace("</head>", `  ${cssLinks}\n  </head>`);
+      } else {
+        html = cssLinks + "\n" + html;
+      }
+    }
+
     writeFileSync(htmlPath, html);
-    console.log(` Rewrote index.html -> ./${bundledName}`);
+    console.log(` Rewrote index.html with hashed assets`);
   }
 
   console.log("\n Build complete!");
