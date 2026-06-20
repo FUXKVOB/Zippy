@@ -13,6 +13,7 @@ pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str)
     let hash = compute_hash(template);
     let scoped_style = scope_css(style, &hash);
     let mut gen = Gen::new(&info.names, &hash);
+    gen.signal_vars = find_signal_vars(script);
 
     let root_js = gen.render_to_js(&nodes, "el");
 
@@ -199,6 +200,72 @@ fn wrap_val(expr: &str) -> String {
 
 // wrap_val free function kept for tests; Gen::wrap_val is used in codegen
 
+// Find all variable names that are assigned signal() calls in the script
+fn find_signal_vars(script: &str) -> HashSet<String> {
+    let mut result = HashSet::new();
+    // Walk through lines and find patterns like:
+    //   let name = signal(...);
+    //   let name: T = signal(...);
+    //   let name = signal<T>(...);
+    //   let name: T = signal<T>(...);
+    let mut chars = script.chars().peekable();
+    while let Some(c) = chars.next() {
+        // Look for "let"
+        if c == 'l' {
+            let mut matched = true;
+            for expected in "et".chars() {
+                if chars.next() != Some(expected) { matched = false; break; }
+            }
+            if !matched { continue; }
+            // Skip whitespace
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() { chars.next(); } else { break; }
+            }
+            // Read identifier
+            let mut name = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_alphanumeric() || c == '_' || c == '$' {
+                    name.push(c);
+                    chars.next();
+                } else { break; }
+            }
+            if name.is_empty() { continue; }
+            // Skip optional type annotation: : T or : T<U>
+            if chars.peek() == Some(&':') {
+                chars.next();
+                let mut depth = 0;
+                while let Some(&c) = chars.peek() {
+                    if c == '<' { depth += 1; chars.next(); continue; }
+                    if c == '>' { depth -= 1; chars.next(); continue; }
+                    if c == '=' && depth == 0 { break; }
+                    if c == ';' || (c == '\n' && depth == 0) { break; }
+                    chars.next();
+                }
+            }
+            // Skip whitespace
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() { chars.next(); } else { break; }
+            }
+            // Expect '='
+            if chars.peek() != Some(&'=') { continue; }
+            chars.next();
+            // Skip whitespace
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() { chars.next(); } else { break; }
+            }
+            // Expect "signal" (possibly with <T>)
+            let mut sig = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_alphanumeric() { sig.push(c); chars.next(); } else { break; }
+            }
+            if sig == "signal" {
+                result.insert(name);
+            }
+        }
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Generator
 // ---------------------------------------------------------------------------
@@ -214,6 +281,7 @@ struct Gen {
     current_each: Option<usize>,
     node_counter: usize,
     plain_vars: HashSet<String>,
+    signal_vars: HashSet<String>,
 }
 
 #[allow(dead_code)]
@@ -254,6 +322,7 @@ impl Gen {
             current_each: None,
             node_counter: 0,
             plain_vars: HashSet::new(),
+            signal_vars: HashSet::new(),
         }
     }
 
@@ -265,10 +334,21 @@ impl Gen {
 
     fn wrap_val(&self, expr: &str) -> String {
         if is_ident(expr) && !self.plain_vars.contains(expr) {
-            format!("{}.val", expr)
+            // Only add .val if this identifier is a known signal
+            // Props and other plain variables don't have .val
+            if self.signal_vars.contains(expr) || self.is_known_global(expr) {
+                format!("{}.val", expr)
+            } else {
+                expr.to_string()
+            }
         } else {
             expr.to_string()
         }
+    }
+
+    fn is_known_global(&self, name: &str) -> bool {
+        // Globals provided by the runtime (props, event, etc.)
+        matches!(name, "props" | "el" | "event" | "e")
     }
 
     fn render_to_js(&mut self, nodes: &[Node], parent_var: &str) -> String {

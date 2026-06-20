@@ -53,6 +53,29 @@
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
   .empty { grid-column: 1 / -1; text-align: center; padding: 48px; color: var(--text-faint); }
+  .user-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: border-color 0.2s ease;
+  }
+  .user-card:hover { border-color: var(--border-strong); }
+  .user-name { font-size: 16px; font-weight: 700; margin: 0 0 4px; color: var(--text); }
+  .user-email { font-size: 13px; color: var(--text-dim); margin: 0 0 16px; }
+  .user-footer {
+    display: flex; align-items: center; gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .user-avatar {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #42b883);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .user-role { font-size: 12px; color: var(--text-dim); }
 </style>
 
 <template>
@@ -70,10 +93,15 @@
       {:else if filtered().length === 0}
         <div class="empty">No matches for "{query}"</div>
       {:else}
-        {#each filtered() as u}
-          <Card title={u.name} desc={u.email}>
-            <UserCard name={u.role} role="ZIPPY-DEV" slot="footer" />
-          </Card>
+        {#each filtered() as u (u.id)}
+          <article class="user-card">
+            <h3 class="user-name">{u.name}</h3>
+            <p class="user-email">{u.email}</p>
+            <div class="user-footer">
+              <span class="user-avatar">{u.name.charAt(0)}</span>
+              <span class="user-role">{u.role}</span>
+            </div>
+          </article>
         {/each}
       {/if}
     </div>
