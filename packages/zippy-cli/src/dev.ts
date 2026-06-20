@@ -1,6 +1,6 @@
 import { serve, file } from "bun";
-import { watch, existsSync, mkdtempSync, rmSync, mkdirSync } from "fs";
-import { join, extname } from "path";
+import { watch, existsSync, mkdtempSync, rmSync, mkdirSync, readFileSync } from "fs";
+import { join, extname, dirname, resolve } from "path";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 
@@ -29,6 +29,62 @@ console.log(`  URL:  http://localhost:${PORT}`);
 
 let bundleCache = new Map<string, { data: string; mtime: number }>();
 let sockets = new Set<Bun.ServerWebSocket>();
+
+// Compile a .zippy file to .js if needed (returns true if compiled)
+function ensureCompiled(zippyPath: string): boolean {
+  if (!existsSync(zippyPath)) return false;
+  const jsPath = zippyPath.replace(/\.zippy$/, ".js");
+  // If .js doesn't exist, or .zippy is newer, recompile
+  if (!existsSync(jsPath)) {
+    try {
+      execSync(`"${COMPILER}" "${zippyPath}" "${jsPath}"`, { stdio: "pipe", timeout: 10000 });
+      bundleCache.delete(jsPath);
+      return true;
+    } catch (e) {
+      console.error(`  Compile error: ${zippyPath}`, (e as Error).message);
+      return false;
+    }
+  }
+  return true;
+}
+
+// Find all .zippy files imported in a .js file (recursively)
+function compileAllDependencies(jsPath: string, visited = new Set<string>()): void {
+  if (visited.has(jsPath)) return;
+  visited.add(jsPath);
+
+  if (!existsSync(jsPath)) return;
+  const content = readFileSync(jsPath, "utf-8");
+
+  // Match import statements: import X from "./Foo.js" or "./Foo.zippy"
+  const importRegex = /import\s+[\w*\s{},]+\s+from\s+["']([^"']+)["']/g;
+  let match;
+  while ((match = importRegex.exec(content)) !== null) {
+    const importPath = match[1];
+    if (!importPath.startsWith(".")) continue; // skip bare imports like @zippy/runtime
+    const dir = dirname(jsPath);
+    const resolved = resolve(dir, importPath);
+    
+    // Check for .zippy source (most common case)
+    if (resolved.endsWith(".zippy")) {
+      if (ensureCompiled(resolved)) {
+        compileAllDependencies(resolved.replace(/\.zippy$/, ".js"), visited);
+      }
+    } else if (resolved.endsWith(".js")) {
+      // Check if the .js exists; if not, try compiling from .zippy
+      if (!existsSync(resolved)) {
+        const zippyPath = resolved.replace(/\.js$/, ".zippy");
+        if (existsSync(zippyPath)) {
+          ensureCompiled(zippyPath);
+        }
+      }
+      // Recurse into .js files to find their dependencies
+      if (existsSync(resolved)) {
+        compileAllDependencies(resolved, visited);
+      }
+    }
+  }
+}
 
 watch(ROOT, { recursive: true }, (ev, filename) => {
   if (!filename?.endsWith(".zippy")) return;
@@ -105,13 +161,13 @@ serve({
       // Try to compile from .zippy source on demand
       const zippyPath = filePath.replace(/\.js$/, ".zippy");
       if (existsSync(zippyPath)) {
-        try {
-          execSync(`"${COMPILER}" "${zippyPath}" "${filePath}"`, { stdio: "pipe", timeout: 10000 });
-        } catch {}
+        ensureCompiled(zippyPath);
       }
     }
 
     if (filePath.endsWith(".js") && existsSync(filePath)) {
+      // Recursively compile all .zippy dependencies
+      compileAllDependencies(filePath);
       const src = Bun.file(filePath);
       const mtime = (await src.stat()).mtimeMs;
       const cached = bundleCache.get(filePath);
