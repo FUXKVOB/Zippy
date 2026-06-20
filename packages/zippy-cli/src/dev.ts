@@ -77,7 +77,7 @@ const ERROR_OVERLAY_SCRIPT = `
 
 serve({
   port: PORT,
-  fetch(req, server) {
+  async fetch(req, server) {
     // Upgrade to WebSocket if requested
     if (server.upgrade(req)) return;
 

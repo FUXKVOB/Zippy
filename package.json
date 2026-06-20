@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run packages/zippy-cli/src/dev.ts",
-    "build": "bun run packages/zippy-cli/src/build.ts",
+    "build": "bun run packages/zippy-cli/src/cli.ts build",
     "test": "bun test",
+    "test:e2e": "playwright test",
     "typecheck": "bun run tsc --noEmit",
     "postinstall": "node scripts/workspace-links.cjs"
   },
