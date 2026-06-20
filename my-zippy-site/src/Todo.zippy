@@ -1,0 +1,241 @@
+<script>
+  const STORAGE_KEY = "zippy-todos";
+
+  let todos = signal([]);
+  let filter = signal("all");
+  let input = signal("");
+
+  const remaining = computed(() => todos.val.filter(t => !t.done).length);
+  const total = computed(() => todos.val.length);
+  const done = computed(() => total.val - remaining.val);
+  const progress = computed(() => total.val === 0 ? 0 : Math.round((done.val / total.val) * 100));
+
+  const filtered = computed(() => {
+    if (filter.val === "active") return todos.val.filter(t => !t.done);
+    if (filter.val === "done") return todos.val.filter(t => t.done);
+    return todos.val;
+  });
+
+  onMount(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try { todos.val = JSON.parse(saved); } catch (e) {}
+    }
+  });
+
+  effect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(todos.val));
+  });
+
+  let nextId = 1;
+  function add(e) {
+    if (e) e.preventDefault();
+    const text = input.val.trim();
+    if (!text) return;
+    todos.val = [...todos.val, { id: nextId++, text, done: false }];
+    input.val = "";
+  }
+
+  function toggle(id) {
+    todos.val = todos.val.map(t => t.id === id ? { ...t, done: !t.done } : t);
+  }
+
+  function remove(id) {
+    todos.val = todos.val.filter(t => t.id !== id);
+  }
+
+  function clearDone() {
+    todos.val = todos.val.filter(t => !t.done);
+  }
+</script>
+
+<style>
+  .page { max-width: 640px; margin: 0 auto; padding: 48px 32px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .subtitle { color: var(--text-dim); margin: 0 0 32px; font-size: 15px; }
+
+  .stats-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; }
+  .stat-text { font-size: 14px; color: var(--text-dim); }
+  .stat-text strong { color: var(--text); font-weight: 700; }
+  .progress-bar {
+    height: 4px;
+    background: var(--bg-elev-2);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--success));
+    transition: width 0.3s ease;
+  }
+
+  .input-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .input-row { display: flex; gap: 8px; }
+  .input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+  .input:focus { border-color: var(--accent); }
+  .input::placeholder { color: var(--text-faint); }
+  .btn {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-weight: 600; font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text-dim);
+  }
+  .btn.ghost:hover { background: var(--bg-elev-2); color: var(--text); }
+
+  .filters { display: flex; gap: 4px; margin-bottom: 16px; }
+  .filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .filter-btn:hover { color: var(--text); }
+  .filter-btn.active {
+    background: var(--bg-elev-2);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .list {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .empty {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 14px;
+  }
+  .item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .item:last-child { border-bottom: none; }
+  .item.done .text { text-decoration: line-through; color: var(--text-faint); }
+  .checkbox {
+    width: 18px; height: 18px;
+    border: 1.5px solid var(--border-strong);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    transition: all 0.15s ease;
+  }
+  .checkbox.checked { background: var(--accent); border-color: var(--accent); }
+  .checkbox.checked::after { content: "OK"; color: #fff; font-size: 10px; font-weight: 700; }
+  .text { flex: 1; font-size: 14px; color: var(--text); }
+  .delete {
+    background: transparent; border: none; color: var(--text-faint);
+    cursor: pointer; font-size: 18px; padding: 0 4px;
+  }
+  .delete:hover { color: var(--error); }
+
+  .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-elev-2);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+</style>
+
+<template>
+  <div class="page">
+    <h1>Todo</h1>
+    <p class="subtitle">Reactive list with localStorage persistence and computed stats.</p>
+
+    <div class="stats-card">
+      <div class="stat-row">
+        <span class="stat-text">
+          <strong>{remaining}</strong> remaining of <strong>{total}</strong>
+        </span>
+        <span class="stat-text">{progress}% done</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: {progress}%"></div>
+      </div>
+    </div>
+
+    <div class="input-card">
+      <form class="input-row" @submit={add}>
+        <input
+          class="input"
+          type="text"
+          placeholder="What needs to be done?"
+          bind:value={input}
+        />
+        <button class="btn" type="submit" disabled={!input.val.trim()}>Add</button>
+      </form>
+    </div>
+
+    <div class="filters">
+      <button class:active={filter.val === "all"} class="filter-btn" @click={() => filter.val = "all"}>All ({total})</button>
+      <button class:active={filter.val === "active"} class="filter-btn" @click={() => filter.val = "active"}>Active ({remaining})</button>
+      <button class:active={filter.val === "done"} class="filter-btn" @click={() => filter.val = "done"}>Done ({done})</button>
+    </div>
+
+    <div class="list">
+      {#if filtered.length === 0}
+        <div class="empty">
+          {filter.val === "all" ? "No todos yet. Add one above!" : "No " + filter.val + " todos."}
+        </div>
+      {:else}
+        {#each filtered as todo}
+          <div class="item" class:done={todo.done}>
+            <div class="checkbox" class:checked={todo.done} @click={() => toggle(todo.id)} role="checkbox" aria-checked={todo.done}></div>
+            <span class="text">{todo.text}</span>
+            <button class="delete" @click={() => remove(todo.id)} aria-label="Delete">x</button>
+          </div>
+        {/each}
+      {/if}
+      <div class="footer">
+        <span>Stored locally - auto-saves</span>
+        <button class="filter-btn" @click={clearDone} disabled={done === 0}>Clear done</button>
+      </div>
+    </div>
+  </div>
+</template>

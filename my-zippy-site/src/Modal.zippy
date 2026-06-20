@@ -1,0 +1,61 @@
+<script>
+  let open = signal(false);
+
+  function close() { open.val = false; }
+  function onKey(e) {
+    if (e.key === "Escape" && open.val) close();
+  }
+</script>
+
+<style>
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    transition: opacity 0.2s ease;
+  }
+  .dialog {
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 24px;
+    max-width: 480px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .head h3 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text); }
+  .close {
+    background: transparent; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 20px; padding: 0; line-height: 1;
+  }
+  .close:hover { color: var(--text); }
+  .body { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
+  .body code { background: var(--bg-elev-2); padding: 1px 6px; border-radius: 4px; }
+  .body a { color: var(--accent); }
+</style>
+
+<template>
+  {#if open.val}
+    <Portal to="body">
+      <div class="backdrop" @click={(e) => e.target === e.currentTarget && close()}>
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="head">
+            <h3>{title || "Modal"}</h3>
+            <button class="close" @click={close} aria-label="Close">x</button>
+          </div>
+          <div class="body">
+            <slot />
+          </div>
+        </div>
+      </div>
+    </Portal>
+  {/if}
+</template>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zippy — Reactive Framework</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script type="module" src="/my-zippy-site/src/App.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg: #0a0a0f;
+      --bg-elev: #12121a;
+      --bg-elev-2: #1a1a25;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.15);
+      --text: #e4e4eb;
+      --text-dim: #8b8b9a;
+      --text-faint: #5a5a6a;
+      --accent: #646cff;
+      --accent-hover: #7c83ff;
+      --success: #42b883;
+      --error: #e34c4c;
+      --warning: #f7b955;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    code, pre, .mono { font-family: 'JetBrains Mono', Menlo, monospace; }
+    #app { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import App from "/my-zippy-site/src/App.js";
+    const app = document.getElementById("app");
+    const cmp = App({});
+    cmp.mount(app);
+  </script>
+</body>
+</html>

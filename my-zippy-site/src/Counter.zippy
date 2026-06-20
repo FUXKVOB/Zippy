@@ -1,0 +1,149 @@
+<script>
+  const STORAGE_KEY = "zippy-counter";
+
+  let count = signal(0);
+  let step = signal(1);
+
+  const doubled = computed(() => count.val * 2);
+  const tripled = computed(() => count.val * 3);
+  const isEven = computed(() => count.val % 2 === 0);
+
+  onMount(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        count.val = data.count ?? 0;
+        step.val = data.step ?? 1;
+      } catch (e) {}
+    }
+  });
+
+  effect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      count: count.val,
+      step: step.val,
+    }));
+  });
+
+  function inc() { count.val = count.val + step.val; }
+  function dec() { count.val = count.val - step.val; }
+  function reset() { count.val = 0; }
+</script>
+
+<style>
+  .page { max-width: 640px; margin: 0 auto; padding: 48px 32px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .subtitle { color: var(--text-dim); margin: 0 0 32px; font-size: 15px; }
+
+  .counter-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+  }
+  .value {
+    font-size: 80px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    color: var(--text);
+    margin: 16px 0;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.2s ease;
+  }
+  .value.even { color: var(--accent); }
+  .value.odd { color: var(--success); }
+  .label { font-size: 13px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 12px; margin: 24px 0;
+  }
+  .stat {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+  .stat-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-value { font-size: 18px; font-weight: 700; color: var(--text); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .controls {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  }
+  .btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-weight: 600; font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--bg-elev); border-color: var(--text-faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .btn.danger { color: var(--error); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .step-control {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: 16px; padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 13px;
+  }
+  .step-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    cursor: pointer; font-size: 14px; font-weight: 600;
+  }
+  .step-btn:hover { background: var(--bg-elev); }
+  .step-value { font-weight: 700; min-width: 24px; text-align: center; color: var(--text); }
+</style>
+
+<template>
+  <div class="page">
+    <h1>Counter</h1>
+    <p class="subtitle">Signals, computed values, and localStorage persistence.</p>
+
+    <div class="counter-card">
+      <div class="label">Current value</div>
+      <div class="value" class:even={isEven} class:odd={!isEven}>{count}</div>
+      <div class="label">{isEven ? "even" : "odd"}</div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">x 2</div>
+          <div class="stat-value">{doubled}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">x 3</div>
+          <div class="stat-value">{tripled}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">abs</div>
+          <div class="stat-value">{count < 0 ? -count : count}</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn danger" @click={reset}>Reset</button>
+        <button class="btn" @click={dec}>- {step}</button>
+        <button class="btn primary" @click={inc}>+ {step}</button>
+      </div>
+
+      <div class="step-control">
+        <span>Step:</span>
+        <button class="step-btn" @click={() => step.val = Math.max(1, step.val - 1)}>-</button>
+        <span class="step-value">{step}</span>
+        <button class="step-btn" @click={() => step.val = step.val + 1}>+</button>
+      </div>
+    </div>
+  </div>
+</template>

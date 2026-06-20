@@ -1,0 +1,108 @@
+<script>
+  import { createRouter } from "@zippy/runtime";
+  import Home from "./Home.zippy";
+  import Counter from "./Counter.zippy";
+  import Todo from "./Todo.zippy";
+  import Users from "./Users.zippy";
+  import AsyncDemo from "./AsyncDemo.zippy";
+
+  let router;
+  let currentPath = "/";
+
+  onMount(() => {
+    router = createRouter({
+      "/": Home,
+      "/counter": Counter,
+      "/todo": Todo,
+      "/users": Users,
+      "/async": AsyncDemo
+    });
+    router.mount(el.querySelector("#outlet"));
+
+    const updatePath = () => { currentPath = router.current(); };
+    window.addEventListener("popstate", updatePath);
+    currentPath = router.current();
+  });
+
+  onDestroy(() => {
+    if (router) router.unmount();
+  });
+
+  function isActive(path) {
+    return currentPath === path;
+  }
+</script>
+
+<style>
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .brand-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #42b883);
+    box-shadow: 0 0 12px var(--accent);
+  }
+  .nav { display: flex; align-items: center; gap: 4px; }
+  .nav a {
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+  }
+  .nav a:hover { color: var(--text); background: var(--bg-elev); }
+  .nav a.active { color: var(--text); background: var(--bg-elev-2); }
+  .outlet { flex: 1; padding: 0; }
+  .footer {
+    padding: 24px 32px;
+    border-top: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 13px;
+    text-align: center;
+  }
+  .footer a { color: var(--text-dim); text-decoration: none; }
+  .footer a:hover { color: var(--accent); }
+</style>
+
+<template>
+  <div class="app">
+    <header class="topbar">
+      <a href="/" class="brand" data-link>
+        <span class="brand-dot"></span>
+        <span>Zippy</span>
+      </a>
+      <nav class="nav">
+        <a href="/" class:active={isActive("/")} data-link>Home</a>
+        <a href="/counter" class:active={isActive("/counter")} data-link>Counter</a>
+        <a href="/todo" class:active={isActive("/todo")} data-link>Todo</a>
+        <a href="/users" class:active={isActive("/users")} data-link>Users</a>
+        <a href="/async" class:active={isActive("/async")} data-link>Async</a>
+      </nav>
+    </header>
+    <main class="outlet" id="outlet"></main>
+    <footer class="footer">Built with <a href="https://github.com/FUXKVOB/Zippy" target="_blank">Zippy</a> - signals, scoped CSS, history routing</footer>
+  </div>
+</template>

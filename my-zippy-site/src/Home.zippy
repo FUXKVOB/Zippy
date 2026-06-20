@@ -1,0 +1,189 @@
+<script>
+  import Card from "./Card.zippy";
+  import Modal from "./Modal.zippy";
+  import UserCard from "./UserCard.zippy";
+
+  let modalOpen = signal(false);
+  let codeLang = signal("zippy");
+
+  const samples = {
+    zippy: [
+      '<' + 'script>',
+      '  let count = signal(0);',
+      '  let doubled = computed(() => count.val * 2);',
+      '<' + '/script>',
+      '',
+      '<' + 'template>',
+      '  <button @click={() => count.val++}>',
+      '    Count: {count} (doubled: {doubled})',
+      '  </button>',
+      '<' + '/template>'
+    ].join('\n'),
+    ts: [
+      'const count = signal(0);',
+      'const doubled = computed(() => count.val * 2);',
+      '',
+      'export default function Counter() {',
+      '  return {',
+      '    el: document.createElement("button"),',
+      '    mount() { /* ... */ }',
+      '  };',
+      '}'
+    ].join('\n'),
+    js: [
+      'const { signal, computed } = await import("@zippy/runtime");',
+      'const count = signal(0);'
+    ].join('\n'),
+  };
+</script>
+
+<style>
+  .home { max-width: 960px; margin: 0 auto; padding: 48px 32px 64px; }
+  .hero { padding: 32px 0 48px; }
+  .hero h1 {
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin: 0 0 16px;
+    background: linear-gradient(180deg, #fff 0%, #b4b4c4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p {
+    font-size: 18px;
+    color: var(--text-dim);
+    max-width: 560px;
+    line-height: 1.6;
+    margin: 0 0 28px;
+  }
+  .cta-row { display: flex; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elev);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+  }
+  .btn:hover { background: var(--bg-elev-2); border-color: var(--text-faint); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn.primary:hover { background: var(--accent-hover); }
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin: 48px 0 16px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .code-tabs {
+    display: flex; gap: 4px;
+    background: var(--bg-elev);
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    width: fit-content;
+    margin-bottom: 12px;
+  }
+  .code-tab {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+  }
+  .code-tab.active { background: var(--bg-elev-2); color: var(--text); }
+  .code-block {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    color: var(--text);
+    margin: 0;
+  }
+  .demo-row {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    margin-top: 20px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge::before {
+    content: ""; width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+</style>
+
+<template>
+  <div class="home">
+    <section class="hero">
+      <span class="badge">v0.0.1 - Rust compiler</span>
+      <h1>The reactive framework that compiles to native speed.</h1>
+      <p>Signals, scoped CSS, async blocks, named slots and SPA routing - all in a tiny, Rust-compiled bundle. No virtual DOM, no runtime overhead.</p>
+      <div class="cta-row">
+        <a href="/counter" class="btn primary" data-link>Try the demo</a>
+        <button class="btn" @click={() => modalOpen.val = true}>Open modal</button>
+      </div>
+    </section>
+
+    <div class="section-title">Features</div>
+    <div class="grid">
+      <Card title="Signals" desc="Fine-grained reactivity without VDOM diffing.">
+        <div slot="footer">Used in the counter page</div>
+      </Card>
+      <Card title="Async blocks" desc="Native Promise handling in templates.">
+        <div slot="footer">See the <a href="/async" data-link>async page</a></div>
+      </Card>
+      <Card title="Named slots" desc="Compose components like Lego bricks.">
+        <UserCard slot="footer" name="Ada Lovelace" role="Engineer" />
+      </Card>
+      <Card title="History routing" desc="Real URLs, not hash hacks.">
+        <div slot="footer">Try the <a href="/users" data-link>users page</a></div>
+      </Card>
+    </div>
+
+    <div class="section-title">Live signal demo</div>
+    <div class="code-tabs">
+      <button class:active={codeLang.val === "zippy"} class="code-tab" @click={() => codeLang.val = "zippy"}>.zippy</button>
+      <button class:active={codeLang.val === "ts"} class="code-tab" @click={() => codeLang.val = "ts"}>.ts</button>
+      <button class:active={codeLang.val === "js"} class="code-tab" @click={() => codeLang.val = "js"}>.js</button>
+    </div>
+    <pre class="code-block"><code>{samples[codeLang]}</code></pre>
+
+    <Modal open={modalOpen} title="Teleport works!">
+      <p>This dialog is rendered into <code>document.body</code> via a portal, even though the component lives deep inside the page tree.</p>
+      <div class="demo-row">
+        <button class="btn primary" @click={() => modalOpen.val = false}>Got it</button>
+      </div>
+    </Modal>
+  </div>
+</template>

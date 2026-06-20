@@ -1,0 +1,49 @@
+<script>
+</script>
+
+<style>
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
+  }
+  .title {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    color: var(--text);
+  }
+  .desc {
+    font-size: 14px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin: 0 0 14px;
+  }
+  .footer-slot {
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .footer-slot a { color: var(--accent); text-decoration: none; }
+  .footer-slot a:hover { text-decoration: underline; }
+</style>
+
+<template>
+  <article class="card">
+    <h3 class="title">{title}</h3>
+    {#if desc}
+      <p class="desc">{desc}</p>
+    {/if}
+    <slot />
+    <div class="footer-slot">
+      <slot name="footer" />
+    </div>
+  </article>
+</template>

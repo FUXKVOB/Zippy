@@ -1,0 +1,81 @@
+<script>
+  let users = signal([]);
+  let query = signal("");
+
+  const filtered = () => {
+    const q = query.val.toLowerCase().trim();
+    if (!q) return users.val;
+    return users.val.filter(u =>
+      u.name.toLowerCase().includes(q) || u.role.toLowerCase().includes(q)
+    );
+  };
+
+  onMount(() => {
+    fetch("https://jsonplaceholder.typicode.com/users")
+      .then(r => r.json())
+      .then((data) => {
+        users.val = data.slice(0, 8).map(u => ({
+          id: u.id,
+          name: u.name,
+          role: (u.company && u.company.bs) || "Engineer",
+          email: u.email
+        }));
+      })
+      .catch(() => {
+        users.val = [
+          { id: 1, name: "Ada Lovelace", role: "First programmer", email: "ada@zippy.dev" },
+          { id: 2, name: "Linus Torvalds", role: "Kernel architect", email: "linus@zippy.dev" },
+          { id: 3, name: "Grace Hopper", role: "Compiler pioneer", email: "grace@zippy.dev" },
+          { id: 4, name: "Alan Turing", role: "Cryptographer", email: "alan@zippy.dev" }
+        ];
+      });
+  });
+</script>
+
+<style>
+  .page { max-width: 800px; margin: 0 auto; padding: 48px 32px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .subtitle { color: var(--text-dim); margin: 0 0 24px; font-size: 15px; }
+
+  .toolbar { display: flex; gap: 12px; margin-bottom: 24px; }
+  .search {
+    flex: 1;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+  .search:focus { border-color: var(--accent); }
+  .search::placeholder { color: var(--text-faint); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .empty { grid-column: 1 / -1; text-align: center; padding: 48px; color: var(--text-faint); }
+</style>
+
+<template>
+  <div class="page">
+    <h1>Users</h1>
+    <p class="subtitle">Fetched from JSONPlaceholder with a fallback. Reactive search included.</p>
+
+    <div class="toolbar">
+      <input class="search" type="search" placeholder="Search by name or role..." bind:value={query} />
+    </div>
+
+    <div class="grid">
+      {#if users.val.length === 0}
+        <div class="empty">Loading...</div>
+      {:else if filtered().length === 0}
+        <div class="empty">No matches for "{query}"</div>
+      {:else}
+        {#each filtered() as u}
+          <Card title={u.name} desc={u.email}>
+            <UserCard name={u.role} role="ZIPPY-DEV" slot="footer" />
+          </Card>
+        {/each}
+      {/if}
+    </div>
+  </div>
+</template>
