@@ -72,6 +72,20 @@ export function createRouter(routes: RouteConfig): RouterInstance {
       outlet = el;
       mounted = true;
       window.addEventListener('popstate', onPopState);
+
+      // Intercept clicks on links with [data-link] to use History API
+      document.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const link = target.closest('a[data-link]') as HTMLAnchorElement | null;
+        if (link && link.href && !link.target && !e.metaKey && !e.ctrlKey) {
+          const url = new URL(link.href);
+          if (url.origin === window.location.origin) {
+            e.preventDefault();
+            this.navigate(url.pathname);
+          }
+        }
+      });
+
       render();
     },
     unmount() {

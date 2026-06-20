@@ -83,7 +83,33 @@ serve({
 
     const url = new URL(req.url);
     let filePath = join(ROOT, url.pathname);
-    if (!extname(filePath)) filePath = join(filePath, "index.html");
+
+    // SPA fallback: if path has no extension and no file exists, serve index.html
+    if (!extname(filePath) && !existsSync(filePath)) {
+      // Try to find index.html in the same directory
+      const indexPath = join(filePath, "index.html");
+      if (existsSync(indexPath)) {
+        filePath = indexPath;
+      } else {
+        // Fall back to root index.html for SPA routing
+        const rootIndex = join(ROOT, "index.html");
+        if (existsSync(rootIndex)) {
+          filePath = rootIndex;
+        }
+      }
+    } else if (!extname(filePath)) {
+      filePath = join(filePath, "index.html");
+    }
+
+    if (filePath.endsWith(".js") && !existsSync(filePath)) {
+      // Try to compile from .zippy source on demand
+      const zippyPath = filePath.replace(/\.js$/, ".zippy");
+      if (existsSync(zippyPath)) {
+        try {
+          execSync(`"${COMPILER}" "${zippyPath}" "${filePath}"`, { stdio: "pipe", timeout: 10000 });
+        } catch {}
+      }
+    }
 
     if (filePath.endsWith(".js") && existsSync(filePath)) {
       const src = Bun.file(filePath);
