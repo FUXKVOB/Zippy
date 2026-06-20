@@ -9,11 +9,19 @@ pub fn generate(script: &str, template: &str, style: &str) -> String {
 
     let root_html = gen.render(&nodes, Mode::Normal);
 
+    let has_lifecycle = info.body.contains("onMount(") || info.body.contains("onDestroy(");
+
     format!(
 r#"{imports}
 import {{ signal, effect }} from "@zippy/runtime";
+{lifestyle_import}
 
 export default function ZippyComponent(props) {{
+  const __onMount = [];
+  const __onDestroy = [];
+  function onMount(fn) {{ __onMount.push(fn); }}
+  function onDestroy(fn) {{ __onDestroy.push(fn); }}
+
   {body_script}
 
   const el = document.createElement('div');
@@ -27,13 +35,14 @@ export default function ZippyComponent(props) {{
 
   return {{
     el,
-    mount(target) {{ target.appendChild(el); }},
-    unmount() {{ el.remove();{unmount_comp}{style_teardown} }},
+    mount(target) {{ target.appendChild(el); __onMount.forEach(fn => fn()); }},
+    unmount() {{ el.remove(); __onDestroy.forEach(fn => fn());{unmount_comp}{style_teardown} }},
     update(newProps) {{ Object.assign(props, newProps); }},
   }};
 }}
 "#,
         imports = info.imports,
+        lifestyle_import = String::new(),
         body_script = info.body,
         hash = hash,
         style_setup = render_style(&scoped_style),
@@ -145,6 +154,7 @@ struct Gen {
     hash: String,
     events: Vec<(String, String)>,
     binds: Vec<(String, String)>,
+    toggles: Vec<(String, String)>,
     exprs: Vec<String>,
     comps: Vec<CompInfo>,
     ifs: Vec<IfInfo>,
@@ -155,11 +165,14 @@ struct CompInfo {
     name: String,
     static_props: Vec<(String, String)>,
     dynamic_props: Vec<(String, String)>,
+    children_html: String,
 }
 
 struct IfInfo {
     expr: String,
     idx: usize,
+    has_fallback: bool,
+    fallback_html: String,
 }
 
 struct EachInfo {
@@ -177,6 +190,7 @@ impl Gen {
             hash: hash.to_string(),
             events: Vec::new(),
             binds: Vec::new(),
+            toggles: Vec::new(),
             exprs: Vec::new(),
             comps: Vec::new(),
             ifs: Vec::new(),
@@ -194,11 +208,21 @@ impl Gen {
         for n in nodes {
             match n {
                 Node::Element { tag, attrs, children } => {
+                    if tag == "slot" {
+                        html.push_str("<div data-zippy-slot></div>");
+                        continue;
+                    }
                     if self.component_names.contains(tag) {
+                        let children_html = if !children.is_empty() {
+                            self.render(children, Mode::Raw)
+                        } else {
+                            String::new()
+                        };
                         let mut ci = CompInfo {
                             name: tag.clone(),
                             static_props: Vec::new(),
                             dynamic_props: Vec::new(),
+                            children_html,
                         };
                         for a in attrs {
                             match &a.value {
@@ -206,6 +230,7 @@ impl Gen {
                                 AttrValue::Dynamic(e) => ci.dynamic_props.push((a.name.clone(), e.clone())),
                                 AttrValue::Event(_, _) => {}
                                 AttrValue::Bind(_, _) => {} // bind on components not yet supported
+                                AttrValue::ClassToggle(_, _) => {} // class: on components not yet supported
                             }
                         }
                         let idx = self.comps.len();
@@ -230,6 +255,11 @@ impl Gen {
                                     let bi = self.binds.len();
                                     self.binds.push((prop.clone(), expr.clone()));
                                     html.push_str(&format!(" data-zippy-bind=\"{}\"", bi));
+                                }
+                                AttrValue::ClassToggle(class_name, expr) => {
+                                    let ti = self.toggles.len();
+                                    self.toggles.push((class_name.clone(), expr.clone()));
+                                    html.push_str(&format!(" data-zippy-toggle=\"{}\"", ti));
                                 }
                             }
                         }
@@ -256,17 +286,33 @@ impl Gen {
                         Mode::Raw => html.push_str(&format!("${{{}}}", e)),
                     }
                 }
-                Node::IfBlock { branches, fallback: _ } => {
+                Node::IfBlock { branches, fallback } => {
                     let idx = self.ifs.len();
+                    let then_html = self.render(&branches[0].1, mode);
+                    let fallback_html = if !fallback.is_empty() {
+                        self.render(fallback, mode)
+                    } else {
+                        String::new()
+                    };
                     self.ifs.push(IfInfo {
                         expr: branches[0].0.clone(),
                         idx,
+                        has_fallback: !fallback.is_empty(),
+                        fallback_html: fallback_html.clone(),
                     });
-                    let body_html = self.render(&branches[0].1, mode);
-                    html.push_str(&format!(
-                        "<!--zippy-if-{}--><div data-zippy-if=\"{}\">{}</div>",
-                        idx, idx, body_html
-                    ));
+                    if !fallback.is_empty() {
+                        html.push_str(&format!(
+                            "<!--zippy-if-{}-->{}<div data-zippy-if=\"{}\"><div data-zippy-if-true=\"{}\">{}</div><div data-zippy-if-false=\"{}\">{}</div></div>",
+                            idx,
+                            "", // placeholder
+                            idx, idx, then_html, idx, fallback_html
+                        ));
+                    } else {
+                        html.push_str(&format!(
+                            "<!--zippy-if-{}--><div data-zippy-if=\"{}\">{}</div>",
+                            idx, idx, then_html
+                        ));
+                    }
                 }
                 Node::EachBlock { list, item, index, body } => {
                     let idx = self.eachs.len();
@@ -335,13 +381,19 @@ impl Gen {
                 init_props.push(format!("{}: {}", k, wrap_val(e)));
             }
 
+            if !ci.children_html.is_empty() {
+                init_props.push(format!("children: `{}`", ci.children_html));
+            }
+
             code.push_str(&format!(
-                "  const __slot{} = el.querySelector('[data-zippy-cmp=\"{}\"]');\n  \
-                 if (__slot{}) {{\n    \
+                "  const __host{} = el.querySelector('[data-zippy-cmp=\"{}\"]');\n  \
+                 if (__host{}) {{\n    \
                    __cmp{} = {}({{ {} }});\n    \
-                   __cmp{}.mount(__slot{});\n  \
+                   __cmp{}.mount(__host{});\n    \
+                   (__cmp{}.el.querySelector('[data-zippy-slot]') || {{}}).innerHTML = `{}`;\n  \
                  }}\n",
-                i, i, i, i, ci.name, init_props.join(", "), i, i
+                i, i, i, i, ci.name, init_props.join(", "), i, i,
+                i, ci.children_html
             ));
 
             if !ci.dynamic_props.is_empty() {
@@ -359,15 +411,31 @@ impl Gen {
 
         // If blocks
         for info in &self.ifs {
-            code.push_str(&format!(
-                "  const __ifAnchor{} = el.querySelector('[data-zippy-if=\"{}\"]');\n  \
-                 if (__ifAnchor{}) {{\n    \
-                   effect(() => {{\n      \
-                     __ifAnchor{}.hidden = !({});\n    \
-                   }});\n  \
-                 }}\n",
-                info.idx, info.idx, info.idx, info.idx, wrap_val(&info.expr)
-            ));
+            if info.has_fallback {
+                code.push_str(&format!(
+                    "  effect(() => {{\n    \
+                       const __p = el.querySelector('[data-zippy-if=\"{}\"]');\n    \
+                       if (!__p) return;\n    \
+                       const __t = __p.querySelector('[data-zippy-if-true=\"{}\"]');\n    \
+                       const __f = __p.querySelector('[data-zippy-if-false=\"{}\"]');\n    \
+                       if (__t) __t.hidden = !({});\n    \
+                       if (__f) __f.hidden = !!({});\n  \
+                     }});\n",
+                    info.idx, info.idx, info.idx,
+                    wrap_val(&info.expr),
+                    wrap_val(&info.expr)
+                ));
+            } else {
+                code.push_str(&format!(
+                    "  const __ifAnchor{} = el.querySelector('[data-zippy-if=\"{}\"]');\n  \
+                     if (__ifAnchor{}) {{\n    \
+                       effect(() => {{\n      \
+                         __ifAnchor{}.hidden = !({});\n    \
+                       }});\n  \
+                     }}\n",
+                    info.idx, info.idx, info.idx, info.idx, wrap_val(&info.expr)
+                ));
+            }
         }
 
         // Bindings
@@ -382,6 +450,17 @@ impl Gen {
                 i, i, i, i, prop, wrap_val(expr),
                 i, expr, i, prop,
                 i, prop, expr
+            ));
+        }
+
+        // Class toggles
+        for (i, (class_name, expr)) in self.toggles.iter().enumerate() {
+            code.push_str(&format!(
+                "  effect(() => {{\n    \
+                   const __n = el.querySelector('[data-zippy-toggle=\"{}\"]');\n    \
+                   if (__n) __n.classList.toggle('{}', {});\n  \
+                 }});\n",
+                i, class_name, wrap_val(expr)
             ));
         }
 

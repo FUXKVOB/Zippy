@@ -1,0 +1,14 @@
+<script>
+  let active = signal(false);
+  const toggle = () => active.val = !active.val;
+</script>
+
+<style>
+  .highlight { background: yellow; }
+</style>
+
+<template>
+  <button @click={toggle} class:highlight={active}>
+    {active ? 'ON' : 'OFF'}
+  </button>
+</template>

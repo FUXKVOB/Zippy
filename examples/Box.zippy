@@ -1,0 +1,13 @@
+<script>
+  // This component has a slot
+</script>
+
+<style>
+  .box { border: 1px solid #ccc; padding: 16px; }
+</style>
+
+<template>
+  <div class="box">
+    <slot></slot>
+  </div>
+</template>

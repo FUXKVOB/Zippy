@@ -1,0 +1,9 @@
+<script>
+  import Box from "./Box.zippy";
+</script>
+
+<template>
+  <Box>
+    <p>This is slotted content</p>
+  </Box>
+</template>

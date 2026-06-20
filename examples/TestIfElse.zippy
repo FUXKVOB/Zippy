@@ -1,0 +1,13 @@
+<script>
+  let show = signal(true);
+  const toggle = () => show.val = !show.val;
+</script>
+
+<template>
+  <button @click={toggle}>Toggle</button>
+  {#if show}
+    <p>Visible</p>
+  {:else}
+    <p>Hidden</p>
+  {/if}
+</template>

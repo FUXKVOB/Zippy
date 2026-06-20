@@ -1,5 +1,53 @@
-use std::iter::Peekable;
-use std::str::Chars;
+#[derive(Clone)]
+pub struct Stream<'a> {
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+    _pos: usize,
+    line: usize,
+    col: usize,
+}
+
+impl<'a> Stream<'a> {
+    fn new(source: &'a str) -> Self {
+        Self { chars: source.chars().peekable(), _pos: 0, line: 1, col: 1 }
+    }
+
+    fn peek(&mut self) -> Option<char> {
+        self.chars.peek().copied()
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let c = self.chars.next();
+        if let Some(c) = c {
+            self._pos += 1;
+            if c == '\n' { self.line += 1; self.col = 1; }
+            else { self.col += 1; }
+        }
+        c
+    }
+
+    fn _pos(&self) -> (usize, usize) { (self.line, self.col) }
+
+    fn err(&self, msg: &str) -> String {
+        format!("line {} col {}: {}", self.line, self.col, msg)
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(c) = self.peek() {
+            if c == ' ' || c == '\t' || c == '\n' || c == '\r' { self.next(); }
+            else { break; }
+        }
+    }
+
+    fn read_ident(&mut self) -> String {
+        let mut s = String::new();
+        if self.peek() == Some('@') { s.push(self.next().unwrap()); }
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == ':' { s.push(self.next().unwrap()); }
+            else { break; }
+        }
+        s
+    }
+}
 
 #[derive(Debug)]
 pub enum Node {
@@ -33,100 +81,98 @@ pub enum AttrValue {
     Static(String),
     Dynamic(String),
     Event(String, String),
-    Bind(String, String), // bind:prop={expr}
+    Bind(String, String),
+    ClassToggle(String, String),
 }
 
 pub fn parse_template(source: &str) -> Result<Vec<Node>, String> {
-    let mut chars = source.chars().peekable();
-    parse_nodes(&mut chars, &[])
+    let mut stream = Stream::new(source);
+    parse_nodes(&mut stream, &[])
 }
 
-fn parse_nodes(chars: &mut Peekable<Chars>, closing: &[&str]) -> Result<Vec<Node>, String> {
+fn parse_nodes(stream: &mut Stream, closing: &[&str]) -> Result<Vec<Node>, String> {
     let mut nodes = Vec::new();
 
     loop {
-        skip_ws(chars);
-        match chars.peek() {
+        stream.skip_ws();
+        match stream.peek() {
             None => break,
             Some('<') => {
-                chars.next();
-                if chars.peek() == Some(&'/') {
-                    // closing tag
-                    chars.next();
+                stream.next();
+                if stream.peek() == Some('/') {
+                    stream.next();
                     let mut tag = String::new();
-                    while let Some(&c) = chars.peek() {
-                        if c == '>' { chars.next(); break; }
-                        tag.push(c); chars.next();
+                    while let Some(c) = stream.peek() {
+                        if c == '>' { stream.next(); break; }
+                        tag.push(c); stream.next();
                     }
                     if closing.contains(&tag.as_str()) {
                         break;
                     }
-                } else if chars.peek() == Some(&'!') {
-                    chars.next();
-                    if chars.peek() == Some(&'-') {
-                        // comment <!-- ... -->
+                } else if stream.peek() == Some('!') {
+                    stream.next();
+                    if stream.peek() == Some('-') {
+                        stream.next(); stream.next();
                         let mut s = String::new();
                         loop {
-                            match chars.next() {
-                                None => break,
-                                Some('-') if chars.peek() == Some(&'-') && chars.clone().nth(1) == Some('>') => {
-                                    chars.next(); chars.next(); break;
+                            match stream.next() {
+                                None => return Err(stream.err("Unclosed <!-- comment")),
+                                Some('-') if stream.peek() == Some('-') && stream.clone().next() == Some('>') => {
+                                    stream.next(); stream.next(); break;
                                 }
                                 Some(c) => s.push(c),
                             }
                         }
                         nodes.push(Node::Text(format!("<!--{}-->", s)));
                     } else {
-                        return Err("Unexpected <! in template".into());
+                        return Err(stream.err("Unexpected <! in template"));
                     }
                 } else {
-                    nodes.push(parse_element(chars)?);
+                    nodes.push(parse_element(stream)?);
                 }
             }
             Some('{') => {
-                let saved = chars.clone();
-                chars.next();
-                match chars.peek() {
+                let saved = stream.clone();
+                stream.next();
+                match stream.peek() {
                     Some('#') => {
-                        chars.next();
+                        stream.next();
                         let mut kw = String::new();
-                        while let Some(&c) = chars.peek() {
+                        while let Some(c) = stream.peek() {
                             if c == ' ' || c == '}' { break; }
-                            kw.push(c); chars.next();
+                            kw.push(c); stream.next();
                         }
                         match kw.as_str() {
-                            "if" => nodes.push(parse_if_block(chars)?),
-                            "each" => nodes.push(parse_each_block(chars)?),
-                            _ => return Err(format!("Unknown block: #{}", kw)),
+                            "if" => nodes.push(parse_if_block(stream)?),
+                            "each" => nodes.push(parse_each_block(stream)?),
+                            _ => return Err(stream.err(&format!("Unknown block: #{}", kw))),
                         }
                     }
                     Some(':') => {
-                        // {:else} or {:else if} — belongs to outer if, stop here
-                        *chars = saved;
+                        *stream = saved;
                         break;
                     }
                     Some('/') => {
-                        // {/if} or {/each} — end block
-                        *chars = saved;
+                        *stream = saved;
                         break;
                     }
                     _ => {
                         let mut expr = String::new();
                         let mut depth = 1;
-                        while let Some(c) = chars.next() {
+                        while let Some(c) = stream.next() {
                             match c {
                                 '{' => depth += 1,
                                 '}' => { depth -= 1; if depth == 0 { break; } }
                                 c => expr.push(c),
                             }
                         }
-                        if depth != 0 { return Err("Unclosed {".into()); }
+                        if depth != 0 { return Err(stream.err("Unclosed {")); }
                         nodes.push(Node::Expr(expr.trim().into()));
                     }
                 }
             }
             Some(_) => {
-                nodes.push(parse_text(chars));
+                nodes.push(parse_text(stream));
             }
         }
     }
@@ -134,73 +180,85 @@ fn parse_nodes(chars: &mut Peekable<Chars>, closing: &[&str]) -> Result<Vec<Node
     Ok(nodes)
 }
 
-fn parse_element(chars: &mut Peekable<Chars>) -> Result<Node, String> {
-    let tag = read_ident(chars);
+fn parse_element(stream: &mut Stream) -> Result<Node, String> {
+    let tag = stream.read_ident();
     let mut attrs = Vec::new();
 
     loop {
-        skip_ws(chars);
-        match chars.peek() {
-            None | Some('>') => { chars.next(); break; }
+        stream.skip_ws();
+        match stream.peek() {
+            None | Some('>') => { stream.next(); break; }
             Some('/') => {
-                chars.next();
-                if chars.next() != Some('>') { return Err("Expected />".into()); }
+                stream.next();
+                if stream.next() != Some('>') { return Err(stream.err("Expected />")); }
                 return Ok(Node::Element { tag, attrs, children: vec![] });
             }
-            _ => { attrs.push(parse_attr(chars)?); }
+            _ => { attrs.push(parse_attr(stream)?); }
         }
     }
 
     if is_void(&tag) { return Ok(Node::Element { tag, attrs, children: vec![] }); }
 
-    let children = parse_nodes(chars, &[&tag])?;
+    let children = parse_nodes(stream, &[&tag])?;
     Ok(Node::Element { tag, attrs, children })
 }
 
-fn parse_attr(chars: &mut Peekable<Chars>) -> Result<Attr, String> {
-    let name = read_ident(chars);
+fn parse_attr(stream: &mut Stream) -> Result<Attr, String> {
+    let name = stream.read_ident();
 
     if name.starts_with('@') {
         let event_name = name[1..].to_string();
-        skip_ws(chars);
-        if chars.peek() == Some(&'=') {
-            chars.next();
-            if let AttrValue::Dynamic(handler) = parse_attr_value(chars) {
+        stream.skip_ws();
+        if stream.peek() == Some('=') {
+            stream.next();
+            if let AttrValue::Dynamic(handler) = parse_attr_value(stream) {
                 return Ok(Attr { name: format!("data-zippy-on-{}", event_name), value: AttrValue::Event(event_name, handler) });
             }
-            return Err("@event needs {{handler}}".into());
+            return Err(stream.err("@event needs {{handler}}"));
         }
-        return Err(format!("@{} requires ={{fn}}", event_name));
+        return Err(stream.err(&format!("@{} requires ={{fn}}", event_name)));
     }
 
     if name.starts_with("bind:") {
         let prop = name[5..].to_string();
-        skip_ws(chars);
-        if chars.peek() == Some(&'=') {
-            chars.next();
-            if let AttrValue::Dynamic(expr) = parse_attr_value(chars) {
+        stream.skip_ws();
+        if stream.peek() == Some('=') {
+            stream.next();
+            if let AttrValue::Dynamic(expr) = parse_attr_value(stream) {
                 return Ok(Attr { name, value: AttrValue::Bind(prop, expr) });
             }
         }
-        return Err(format!("bind:{} requires ={{expr}}", prop));
+        return Err(stream.err(&format!("bind:{} requires ={{expr}}", prop)));
     }
 
-    skip_ws(chars);
-    if chars.peek() == Some(&'=') {
-        chars.next();
-        Ok(Attr { name, value: parse_attr_value(chars) })
+    if name.starts_with("class:") {
+        let class_name = name[6..].to_string();
+        stream.skip_ws();
+        if stream.peek() == Some('=') {
+            stream.next();
+            if let AttrValue::Dynamic(expr) = parse_attr_value(stream) {
+                return Ok(Attr { name, value: AttrValue::ClassToggle(class_name, expr) });
+            }
+        }
+        return Err(stream.err(&format!("class:{} requires ={{expr}}", class_name)));
+    }
+
+    stream.skip_ws();
+    if stream.peek() == Some('=') {
+        stream.next();
+        Ok(Attr { name, value: parse_attr_value(stream) })
     } else {
         Ok(Attr { name, value: AttrValue::Static(String::new()) })
     }
 }
 
-fn parse_attr_value(chars: &mut Peekable<Chars>) -> AttrValue {
-    match chars.peek() {
+fn parse_attr_value(stream: &mut Stream) -> AttrValue {
+    match stream.peek() {
         Some('"') => {
-            chars.next();
+            stream.next();
             let mut s = String::new();
             loop {
-                match chars.next() {
+                match stream.next() {
                     None | Some('"') => break,
                     Some(c) => s.push(c),
                 }
@@ -208,10 +266,10 @@ fn parse_attr_value(chars: &mut Peekable<Chars>) -> AttrValue {
             AttrValue::Static(s)
         }
         Some('{') => {
-            chars.next();
+            stream.next();
             let mut expr = String::new();
             let mut depth = 1;
-            while let Some(c) = chars.next() {
+            while let Some(c) = stream.next() {
                 match c {
                     '{' => depth += 1,
                     '}' => { depth -= 1; if depth == 0 { break; } }
@@ -222,76 +280,74 @@ fn parse_attr_value(chars: &mut Peekable<Chars>) -> AttrValue {
         }
         _ => {
             let mut s = String::new();
-            while let Some(&c) = chars.peek() {
+            while let Some(c) = stream.peek() {
                 if c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' { break; }
-                s.push(c); chars.next();
+                s.push(c); stream.next();
             }
             AttrValue::Static(s)
         }
     }
 }
 
-// ----------------------------------------------------------------
-// {#if} block
-// ----------------------------------------------------------------
-fn parse_if_block(chars: &mut Peekable<Chars>) -> Result<Node, String> {
-    skip_ws(chars);
+fn parse_if_block(stream: &mut Stream) -> Result<Node, String> {
+    stream.skip_ws();
     let mut cond = String::new();
-    while let Some(&c) = chars.peek() {
-        if c == '}' { chars.next(); break; }
-        cond.push(c); chars.next();
+    while let Some(c) = stream.peek() {
+        if c == '}' { stream.next(); break; }
+        cond.push(c); stream.next();
     }
 
     let mut branches: Vec<(String, Vec<Node>)> = Vec::new();
-    let then_body = parse_nodes(chars, &["/if", ":else", ":else if"])?;
+    let then_body = parse_nodes(stream, &["/if", ":else", ":else if"])?;
     branches.push((cond.trim().to_string(), then_body));
 
     let mut fallback: Vec<Node> = Vec::new();
 
     loop {
-        match chars.peek() {
-            None => return Err("Unclosed {#if}".into()),
+        match stream.peek() {
+            None => return Err(stream.err("Unclosed {#if}")),
             Some('{') => {
-                chars.next();
-                match chars.peek() {
+                stream.next();
+                match stream.peek() {
                     Some(':') => {
-                        chars.next();
+                        stream.next();
                         let mut kw = String::new();
-                        while let Some(&c) = chars.peek() {
-                            if c == '}' { chars.next(); break; }
-                            kw.push(c); chars.next();
+                        while let Some(c) = stream.peek() {
+                            if c == '}' { stream.next(); break; }
+                            kw.push(c); stream.next();
                         }
                         let kw = kw.trim();
                         if kw == "else" {
-                            fallback = parse_nodes(chars, &["/if"])?;
-                            chars.next(); chars.next(); chars.next(); // consume {/if}
+                            fallback = parse_nodes(stream, &["/if"])?;
+                            if stream.peek() == Some('{') { stream.next(); }
+                            while let Some(c) = stream.peek() {
+                                if c == '}' { stream.next(); break; }
+                                stream.next();
+                            }
                             break;
                         } else if kw.starts_with("else if") {
-                            let cond = kw[7..].trim().to_string();
-                            let body = parse_nodes(chars, &["/if", ":else", ":else if"])?;
+                            let cond = kw[7..].to_string();
+                            let body = parse_nodes(stream, &["/if", ":else", ":else if"])?;
                             branches.push((cond, body));
                             continue;
                         } else {
-                            return Err(format!("Unknown block keyword: {}", kw));
+                            return Err(stream.err(&format!("Unknown block keyword: {}", kw)));
                         }
                     }
                     Some('/') => {
-                        chars.next(); // /
+                        stream.next();
                         let mut end = String::new();
-                        while let Some(&c) = chars.peek() {
-                            if c == '}' { chars.next(); break; }
-                            end.push(c); chars.next();
+                        while let Some(c) = stream.peek() {
+                            if c == '}' { stream.next(); break; }
+                            end.push(c); stream.next();
                         }
-                        if end.trim() != "if" { return Err("Expected {/if}".into()); }
+                        if end.trim() != "if" { return Err(stream.err("Expected {/if}")); }
                         break;
                     }
-                    _ => return Err("Expected {:else} or {/if}".into()),
+                    _ => return Err(stream.err("Expected {:else} or {/if}")),
                 }
             }
-            Some(_) => {
-                // shouldn't reach here since parse_nodes consumes delimiters
-                break;
-            }
+            Some(_) => break,
             None => break,
         }
     }
@@ -299,21 +355,17 @@ fn parse_if_block(chars: &mut Peekable<Chars>) -> Result<Node, String> {
     Ok(Node::IfBlock { branches, fallback })
 }
 
-// ----------------------------------------------------------------
-// {#each} block
-// ----------------------------------------------------------------
-fn parse_each_block(chars: &mut Peekable<Chars>) -> Result<Node, String> {
-    skip_ws(chars);
+fn parse_each_block(stream: &mut Stream) -> Result<Node, String> {
+    stream.skip_ws();
     let mut rest = String::new();
-    while let Some(&c) = chars.peek() {
-        if c == '}' { chars.next(); break; }
-        rest.push(c); chars.next();
+    while let Some(c) = stream.peek() {
+        if c == '}' { stream.next(); break; }
+        rest.push(c); stream.next();
     }
 
-    // rest: "items as item" or "items as item, index"
     let parts: Vec<&str> = rest.splitn(3, ' ').collect();
     if parts.len() < 3 || parts[1] != "as" {
-        return Err("{#each items as item} expected".into());
+        return Err(stream.err("{#each items as item} expected"));
     }
     let list = parts[0].trim().to_string();
     let rest2 = parts[2..].join(" ");
@@ -323,15 +375,14 @@ fn parse_each_block(chars: &mut Peekable<Chars>) -> Result<Node, String> {
         (rest2.trim().to_string(), None)
     };
 
-    let body = parse_nodes(chars, &["/each"])?;
-    // consume {/each}
-    if chars.peek() == Some(&'{') {
-        chars.next();
-        if chars.peek() == Some(&'/') {
-            chars.next();
-            while let Some(&c) = chars.peek() {
-                if c == '}' { chars.next(); break; }
-                chars.next();
+    let body = parse_nodes(stream, &["/each"])?;
+    if stream.peek() == Some('{') {
+        stream.next();
+        if stream.peek() == Some('/') {
+            stream.next();
+            while let Some(c) = stream.peek() {
+                if c == '}' { stream.next(); break; }
+                stream.next();
             }
         }
     }
@@ -339,30 +390,13 @@ fn parse_each_block(chars: &mut Peekable<Chars>) -> Result<Node, String> {
     Ok(Node::EachBlock { list, item, index, body })
 }
 
-fn parse_text(chars: &mut Peekable<Chars>) -> Node {
+fn parse_text(stream: &mut Stream) -> Node {
     let mut s = String::new();
-    while let Some(&c) = chars.peek() {
+    while let Some(c) = stream.peek() {
         if c == '<' || c == '{' { break; }
-        s.push(c); chars.next();
+        s.push(c); stream.next();
     }
     Node::Text(s)
-}
-
-fn read_ident(chars: &mut Peekable<Chars>) -> String {
-    let mut s = String::new();
-    if chars.peek() == Some(&'@') { s.push(chars.next().unwrap()); }
-    while let Some(&c) = chars.peek() {
-        if c.is_alphanumeric() || c == '_' || c == '-' || c == ':' { s.push(chars.next().unwrap()); }
-        else { break; }
-    }
-    s
-}
-
-fn skip_ws(chars: &mut Peekable<Chars>) {
-    while let Some(&c) = chars.peek() {
-        if c == ' ' || c == '\t' || c == '\n' || c == '\r' { chars.next(); }
-        else { break; }
-    }
 }
 
 fn is_void(tag: &str) -> bool {
@@ -578,5 +612,13 @@ mod tests {
     fn parse_error_unclosed_expr() {
         let result = parse_template("<p>{unclosed</p>");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_error_line_number() {
+        let result = parse_template("<div>\n<span>{bad\n</span>\n</div>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("line 4"), "error should contain line number, got: {}", err);
     }
 }
