@@ -18,13 +18,14 @@ fn main() {
         .expect("Failed to read input file");
 
     let component = parser::parse(&source).expect("Failed to parse .zippy file");
-    let output = codegen::generate(&component.script, &component.template, &component.style);
+    let ext = if component.script_lang == "ts" { ".ts" } else { ".js" };
+    let output = codegen::generate_with_lang(&component.script, &component.template, &component.style, &component.script_lang);
 
     let output_path = args.get(2)
         .map(|p| p.clone())
         .unwrap_or_else(|| {
             let stem = Path::new(input_path).file_stem().unwrap().to_str().unwrap();
-            format!("{}.js", stem)
+            format!("{}{}", stem, ext)
         });
 
     fs::write(&output_path, output).expect("Failed to write output");

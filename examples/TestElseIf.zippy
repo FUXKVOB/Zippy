@@ -1,0 +1,15 @@
+<script>
+  let score = signal(75);
+</script>
+
+<template>
+  {#if score > 90}
+    <p>A</p>
+  {:else if score > 75}
+    <p>B</p>
+  {:else if score > 50}
+    <p>C</p>
+  {:else}
+    <p>D</p>
+  {/if}
+</template>

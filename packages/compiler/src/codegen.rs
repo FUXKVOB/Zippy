@@ -1,8 +1,13 @@
 use crate::template::{self, AttrValue, Node};
 
 pub fn generate(script: &str, template: &str, style: &str) -> String {
+    generate_with_lang(script, template, style, "js")
+}
+
+pub fn generate_with_lang(script: &str, template: &str, style: &str, lang: &str) -> String {
+    let ext = if lang == "ts" { ".ts" } else { ".js" };
     let nodes = template::parse_template(template).expect("Failed to parse template");
-    let info = extract_imports(script);
+    let info = extract_imports(script, ext);
     let hash = compute_hash(template);
     let scoped_style = scope_css(style, &hash);
     let mut gen = Gen::new(&info.names, &hash);
@@ -10,6 +15,7 @@ pub fn generate(script: &str, template: &str, style: &str) -> String {
     let root_html = gen.render(&nodes, Mode::Normal);
 
     let _has_lifecycle = info.body.contains("onMount(") || info.body.contains("onDestroy(");
+    let _lang = lang;
 
     let runtime_imports = if gen.has_each() {
         r#"import { signal, effect, on, reconcileEach } from "@zippy/runtime";"#
@@ -71,7 +77,7 @@ struct ImportInfo {
     names: Vec<String>,
 }
 
-fn extract_imports(script: &str) -> ImportInfo {
+fn extract_imports(script: &str, ext: &str) -> ImportInfo {
     let mut imports = Vec::new();
     let mut body = Vec::new();
     let mut names = Vec::new();
@@ -79,7 +85,7 @@ fn extract_imports(script: &str) -> ImportInfo {
     for line in script.lines() {
         let t = line.trim();
         if t.starts_with("import ") {
-            let rewritten = t.replace(".zippy", ".js");
+            let rewritten = t.replace(".zippy", ext);
             if let Some(rest) = t.strip_prefix("import ") {
                 if let Some(name) = rest.split_whitespace().next() {
                     names.push(name.to_string());
@@ -176,10 +182,8 @@ struct CompInfo {
 }
 
 struct IfInfo {
-    expr: String,
     idx: usize,
-    has_fallback: bool,
-    fallback_html: String,
+    conds: Vec<String>, // conditions for each branch; empty string = else branch
 }
 
 struct EachInfo {
@@ -295,31 +299,31 @@ impl Gen {
                 }
                 Node::IfBlock { branches, fallback } => {
                     let idx = self.ifs.len();
-                    let then_html = self.render(&branches[0].1, mode);
-                    let fallback_html = if !fallback.is_empty() {
-                        self.render(fallback, mode)
-                    } else {
-                        String::new()
-                    };
-                    self.ifs.push(IfInfo {
-                        expr: branches[0].0.clone(),
-                        idx,
-                        has_fallback: !fallback.is_empty(),
-                        fallback_html: fallback_html.clone(),
-                    });
-                    if !fallback.is_empty() {
-                        html.push_str(&format!(
-                            "<!--zippy-if-{}-->{}<div data-zippy-if=\"{}\"><div data-zippy-if-true=\"{}\">{}</div><div data-zippy-if-false=\"{}\">{}</div></div>",
-                            idx,
-                            "", // placeholder
-                            idx, idx, then_html, idx, fallback_html
+                    let mut conds = Vec::new();
+                    let mut all_html = String::new();
+                    let mut bi = 0;
+                    for (cond, body) in branches {
+                        let body_html = self.render(body, mode);
+                        conds.push(cond.clone());
+                        all_html.push_str(&format!(
+                            "<div data-zippy-branch=\"{}-{}\">{}</div>",
+                            idx, bi, body_html
                         ));
-                    } else {
-                        html.push_str(&format!(
-                            "<!--zippy-if-{}--><div data-zippy-if=\"{}\">{}</div>",
-                            idx, idx, then_html
+                        bi += 1;
+                    }
+                    if !fallback.is_empty() {
+                        let else_html = self.render(fallback, mode);
+                        conds.push(String::new()); // empty = else
+                        all_html.push_str(&format!(
+                            "<div data-zippy-branch=\"{}-{}\">{}</div>",
+                            idx, bi, else_html
                         ));
                     }
+                    self.ifs.push(IfInfo { idx, conds });
+                    html.push_str(&format!(
+                        "<div data-zippy-if=\"{}\">{}</div>",
+                        idx, all_html
+                    ));
                 }
                 Node::EachBlock { list, item, index, body } => {
                     let idx = self.eachs.len();
@@ -346,9 +350,6 @@ impl Gen {
         let mut d = String::new();
         for i in 0..self.comps.len() {
             d.push_str(&format!("  let __cmp{};\n", i));
-        }
-        for info in &self.ifs {
-            d.push_str(&format!("  let __if{};\n", info.idx));
         }
         for info in &self.eachs {
             d.push_str(&format!("  let __each{};\n", info.idx));
@@ -416,33 +417,36 @@ impl Gen {
             }
         }
 
-        // If blocks
+        // If blocks — supports {:else if} chains via flat data-zippy-branch divs
         for info in &self.ifs {
-            if info.has_fallback {
-                code.push_str(&format!(
-                    "  effect(() => {{\n    \
-                       const __p = el.querySelector('[data-zippy-if=\"{}\"]');\n    \
-                       if (!__p) return;\n    \
-                       const __t = __p.querySelector('[data-zippy-if-true=\"{}\"]');\n    \
-                       const __f = __p.querySelector('[data-zippy-if-false=\"{}\"]');\n    \
-                       if (__t) __t.hidden = !({});\n    \
-                       if (__f) __f.hidden = !!({});\n  \
-                     }});\n",
-                    info.idx, info.idx, info.idx,
-                    wrap_val(&info.expr),
-                    wrap_val(&info.expr)
-                ));
-            } else {
-                code.push_str(&format!(
-                    "  const __ifAnchor{} = el.querySelector('[data-zippy-if=\"{}\"]');\n  \
-                     if (__ifAnchor{}) {{\n    \
-                       effect(() => {{\n      \
-                         __ifAnchor{}.hidden = !({});\n    \
-                       }});\n  \
-                     }}\n",
-                    info.idx, info.idx, info.idx, info.idx, wrap_val(&info.expr)
-                ));
+            code.push_str(&format!(
+                "  effect(() => {{\n    \
+                   const __p = el.querySelector('[data-zippy-if=\"{}\"]');\n    \
+                   if (!__p) return;\n    \
+                   const __b = __p.querySelectorAll('[data-zippy-branch]');\n    \
+                   for (const __n of __b) __n.hidden = true;\n",
+                info.idx
+            ));
+            for (i, cond) in info.conds.iter().enumerate() {
+                if i == 0 {
+                    code.push_str(&format!(
+                        "  if ({}) {{ if (__b[{}]) __b[{}].hidden = false; }}\n",
+                        wrap_val(cond), i, i
+                    ));
+                } else if cond.is_empty() {
+                    // else branch
+                    code.push_str(&format!(
+                        "  else {{ if (__b[{}]) __b[{}].hidden = false; }}\n",
+                        i, i
+                    ));
+                } else {
+                    code.push_str(&format!(
+                        "  else if ({}) {{ if (__b[{}]) __b[{}].hidden = false; }}\n",
+                        wrap_val(cond), i, i
+                    ));
+                }
             }
+            code.push_str("  });\n");
         }
 
         // Bindings
@@ -623,7 +627,7 @@ mod tests {
 
     #[test]
     fn test_extract_imports() {
-        let info = extract_imports("import Foo from './Foo.zippy'\nlet x = 1");
+        let info = extract_imports("import Foo from './Foo.zippy'\nlet x = 1", ".js");
         assert_eq!(info.names, vec!["Foo"]);
         assert!(info.imports.contains("Foo"));
         assert!(info.imports.contains(".js"));
