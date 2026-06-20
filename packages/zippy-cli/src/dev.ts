@@ -49,6 +49,32 @@ watch(ROOT, { recursive: true }, (ev, filename) => {
   }
 });
 
+const ERROR_OVERLAY_SCRIPT = `
+<script>
+(function() {
+  function showOverlay(msg, stack) {
+    let el = document.getElementById('zippy-error-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'zippy-error-overlay';
+      el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);color:#fff;font-family:monospace;padding:24px;z-index:99999;overflow:auto;';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<div style="background:#1a1a2e;border:1px solid #e34c4c;border-radius:8px;padding:20px;max-width:900px;margin:0 auto;"><h2 style="color:#e34c4c;margin:0 0 12px;">⚡ Zippy Runtime Error</h2><pre style="white-space:pre-wrap;color:#ff6b6b;margin:0 0 16px;">' + msg + '</pre><pre style="white-space:pre-wrap;color:#888;font-size:12px;margin:0;">' + (stack || '') + '</pre><button onclick="document.getElementById(\\'zippy-error-overlay\\').remove()" style="margin-top:16px;padding:8px 16px;background:#e34c4c;color:#fff;border:none;border-radius:4px;cursor:pointer;">Dismiss</button></div>';
+  }
+  window.addEventListener('error', function(e) {
+    showOverlay(e.message || 'Unknown error', e.error && e.error.stack);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    showOverlay('Unhandled Promise rejection: ' + (e.reason && e.reason.message || e.reason), e.reason && e.reason.stack);
+  });
+  if (window.__ZIPPY_HMR__) {
+    window.__ZIPPY_HMR__.onError = function(err) { showOverlay(err, ''); };
+  }
+})();
+</script>
+`;
+
 serve({
   port: PORT,
   fetch(req, server) {
@@ -94,6 +120,14 @@ serve({
       } finally {
         try { rmSync(tmp, { recursive: true }); } catch {}
       }
+    }
+
+    // Serve index.html with error overlay injected
+    if (filePath.endsWith("index.html") && existsSync(filePath)) {
+      const html = Bun.file(filePath);
+      const content = await html.text();
+      const injected = content.replace("</head>", ERROR_OVERLAY_SCRIPT + "</head>");
+      return new Response(injected, { headers: { "Content-Type": "text/html" } });
     }
 
     const f = file(filePath);

@@ -301,6 +301,26 @@ impl Gen {
                         js.push_str(&format!("  {}.appendChild({});\n", parent_var, id));
                         continue;
                     }
+                    if tag == "Portal" {
+                        // <Portal to="body">...</Portal> renders children to document.body (or other selector)
+                        let to = attrs.iter().find_map(|a| {
+                            if a.name == "to" {
+                                if let AttrValue::Static(v) = &a.value { Some(v.clone()) } else { None }
+                            } else { None }
+                        }).unwrap_or_else(|| "body".to_string());
+
+                        let frag_var = self.next_id();
+                        js.push_str(&format!(
+                            "  const {} = document.createDocumentFragment();\n",
+                            frag_var
+                        ));
+                        js.push_str(&self.render_to_js(children, &frag_var));
+                        js.push_str(&format!(
+                            "  effect(() => {{\n    const __target = document.querySelector('{}') || document.body;\n    if ({} && {} !== __target) {{ __target.appendChild({}); }}\n  }});\n",
+                            to, frag_var, frag_var, frag_var
+                        ));
+                        continue;
+                    }
                     if self.component_names.contains(tag) {
                         let mut ci = CompInfo {
                             name: tag.clone(),
@@ -386,6 +406,17 @@ impl Gen {
                         js.push_str(&format!("  const {} = document.createElement('{}');\n", id, tag));
                         
                         for a in attrs {
+                            if a.name == "transition" {
+                                if let AttrValue::Static(v) = &a.value {
+                                    if v == "fade" {
+                                        js.push_str(&format!(
+                                            "  {}.classList.add('zippy-enter');\n  requestAnimationFrame(() => requestAnimationFrame(() => {}.classList.remove('zippy-enter')));\n",
+                                            id, id
+                                        ));
+                                    }
+                                }
+                                continue;
+                            }
                             match &a.value {
                                 AttrValue::Static(v) => {
                                     js.push_str(&format!("  {}.setAttribute('{}', '{}');\n", id, a.name, v));

@@ -1,5 +1,5 @@
 export { signal, computed, effect, batch, Signal } from './reactivity';
-export { createElement, setText, setAttr, listen, insertAfter, removeAll, on, clearAfter, createComment } from './dom';
+export { createElement, setText, setAttr, listen, insertAfter, removeAll, on, clearAfter, createComment, teleportTo } from './dom';
 export { createComponent, ZippyComponent, ComponentFactory } from './component';
 export { reconcileEach, EachEntry } from './each';
-export { createRouter } from './router';
+export { createRouter, RouterInstance } from './router';

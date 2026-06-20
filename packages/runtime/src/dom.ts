@@ -49,3 +49,7 @@ export function on(
   el.addEventListener(event, handler);
   cleanup.add(() => el.removeEventListener(event, handler));
 }
+
+export function teleportTo(target: Node, content: Node): void {
+  target.appendChild(content);
+}

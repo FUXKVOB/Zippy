@@ -26,9 +26,9 @@
 <template>
   <h1>Zippy SPA</h1>
   <nav>
-    <a href="#/">Home</a>
-    <a href="#/counter">Counter</a>
-    <a href="#/todo">Todo</a>
+    <a href="/" data-link>Home</a>
+    <a href="/counter" data-link>Counter</a>
+    <a href="/todo" data-link>Todo</a>
   </nav>
   <div id="outlet"></div>
 </template>
