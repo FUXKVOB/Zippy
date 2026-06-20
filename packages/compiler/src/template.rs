@@ -326,7 +326,7 @@ fn parse_if_block(stream: &mut Stream) -> Result<Node, String> {
                             }
                             break;
                         } else if kw.starts_with("else if") {
-                            let cond = kw[7..].to_string();
+                            let cond = kw[7..].trim().to_string();
                             let body = parse_nodes(stream, &["/if", ":else", ":else if"])?;
                             branches.push((cond, body));
                             continue;
