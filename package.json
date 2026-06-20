@@ -1,0 +1,15 @@
+{
+  "name": "zippy-workspace",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "type": "module",
+  "scripts": {
+    "dev": "bun run packages/zippy-cli/src/dev.ts",
+    "build": "bun run packages/zippy-cli/src/build.ts",
+    "test": "bun test",
+    "typecheck": "bun run tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

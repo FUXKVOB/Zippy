@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zippy App</title>
+  <script type="module" src="/examples/Counter.js"></script>
+</head>
+<body>
+  <h2>Zippy Framework Demo</h2>
+  <div id="app"></div>
+  <script type="module">
+    import Counter from "/examples/Counter.js";
+
+    const app = document.getElementById("app");
+    const cmp = Counter({ start: 3 });
+    cmp.mount(app);
+  </script>
+</body>
+</html>

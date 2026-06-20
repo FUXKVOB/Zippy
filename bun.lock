@@ -1,0 +1,33 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "zippy-workspace",
+      "devDependencies": {
+        "typescript": "^6.0.3",
+      },
+    },
+    "packages/runtime": {
+      "name": "@zippy/runtime",
+      "version": "0.0.1",
+    },
+    "packages/zippy-cli": {
+      "name": "zippy-cli",
+      "version": "0.0.1",
+      "bin": {
+        "zippy": "src/cli.ts",
+      },
+      "dependencies": {
+        "@zippy/runtime": "workspace:*",
+      },
+    },
+  },
+  "packages": {
+    "@zippy/runtime": ["@zippy/runtime@workspace:packages/runtime"],
+
+    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "zippy-cli": ["zippy-cli@workspace:packages/zippy-cli"],
+  }
+}

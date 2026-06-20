@@ -1,0 +1,6 @@
+node_modules/
+.bun/
+target/
+dist/
+*.js
+!examples/*.js

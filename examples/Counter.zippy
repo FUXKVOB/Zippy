@@ -1,0 +1,21 @@
+<script>
+  let count = signal(props.start ?? 0);
+  const increment = () => count.set(count.get() + 1);
+</script>
+
+<style>
+  button {
+    padding: 8px 16px;
+    font-size: 16px;
+  }
+  .counter {
+    font-size: 24px;
+    font-weight: bold;
+  }
+</style>
+
+<template>
+  <div class="counter">
+    <button @click={increment}>Count: {count}</button>
+  </div>
+</template>

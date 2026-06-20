@@ -1,0 +1,11 @@
+{
+  "name": "zippy-cli",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "zippy": "src/cli.ts"
+  },
+  "dependencies": {
+    "@zippy/runtime": "workspace:*"
+  }
+}
