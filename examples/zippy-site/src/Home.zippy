@@ -1,13 +1,29 @@
+<script>
+  import { signal } from "@zippy/runtime";
+  import Card from "./Card.zippy";
+  import AwaitDemo from "./AwaitDemo.zippy";
+
+  let count = signal(0);
+</script>
+
 <style>
-  .hero { text-align: center; padding: 40px 0; }
-  .hero h2 { font-size: 2em; margin-bottom: 10px; }
-  .hero p { color: #666; font-size: 1.1em; }
+  h2 { color: #333; }
 </style>
 
 <template>
-  <div class="hero">
-    <h2>Welcome!</h2>
-    <p>This is a demo SPA built with Zippy.</p>
-    <p>Check out the <a href="#/counter">counter</a> or <a href="#/todo">todo list</a>.</p>
-  </div>
+  <h2>Home</h2>
+  <p>Welcome to Zippy SPA! Count: {count}</p>
+  <button @click={() => count.val++}>Increment</button>
+
+  <Card>
+    <template slot="header">My Card Title</template>
+    <p>This is the card body content.</p>
+    <p>It supports multiple elements.</p>
+    <template slot="footer">Card footer text</template>
+  </Card>
+
+  <Card>
+    <template slot="header">Await Demo</template>
+    <AwaitDemo />
+  </Card>
 </template>

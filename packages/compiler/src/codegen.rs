@@ -1,4 +1,5 @@
 use crate::template::{self, AttrValue, Node};
+use std::collections::HashSet;
 
     #[allow(dead_code)]
     pub fn generate(script: &str, template: &str, style: &str) -> Result<(String, String), String> {
@@ -187,6 +188,7 @@ fn is_ident(s: &str) -> bool {
     s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
+#[allow(dead_code)]
 fn wrap_val(expr: &str) -> String {
     if is_ident(expr) {
         format!("{}.val", expr)
@@ -194,6 +196,8 @@ fn wrap_val(expr: &str) -> String {
         expr.to_string()
     }
 }
+
+// wrap_val free function kept for tests; Gen::wrap_val is used in codegen
 
 // ---------------------------------------------------------------------------
 // Generator
@@ -208,6 +212,8 @@ struct Gen {
     ifs: Vec<IfInfo>,
     eachs: Vec<EachInfo>,
     current_each: Option<usize>,
+    node_counter: usize,
+    plain_vars: HashSet<String>,
 }
 
 #[allow(dead_code)]
@@ -246,21 +252,53 @@ impl Gen {
             ifs: Vec::new(),
             eachs: Vec::new(),
             current_each: None,
+            node_counter: 0,
+            plain_vars: HashSet::new(),
+        }
+    }
+
+    fn next_id(&mut self) -> String {
+        let id = format!("_z{}", self.node_counter);
+        self.node_counter += 1;
+        id
+    }
+
+    fn wrap_val(&self, expr: &str) -> String {
+        if is_ident(expr) && !self.plain_vars.contains(expr) {
+            format!("{}.val", expr)
+        } else {
+            expr.to_string()
         }
     }
 
     fn render_to_js(&mut self, nodes: &[Node], parent_var: &str) -> String {
         let mut js = String::new();
 
-        for (i, n) in nodes.iter().enumerate() {
-            let id = format!("_n{}", i);
+        for n in nodes.iter() {
+            let id = self.next_id();
             match n {
                 Node::Element { tag, attrs, children } => {
                     if tag == "slot" {
+                        let slot_name = attrs.iter().find_map(|a| {
+                            if a.name == "name" {
+                                if let AttrValue::Static(v) = &a.value { Some(v.clone()) } else { None }
+                            } else { None }
+                        }).unwrap_or("default".to_string());
+                        
                         js.push_str(&format!(
-                            "  const {} = document.createElement('div');\n  {}.setAttribute('data-zippy-slot', '');\n  {}.appendChild({});\n",
-                            id, id, parent_var, id
+                            "  const {} = document.createElement('div');\n  {}.setAttribute('data-zippy-slot', '{}');\n",
+                            id, id, slot_name
                         ));
+                        js.push_str(&format!(
+                            "  if (props.__slots && props.__slots['{}']) {}.appendChild(props.__slots['{}']);\n",
+                            slot_name, id, slot_name
+                        ));
+                        if !children.is_empty() {
+                            js.push_str("  else {\n");
+                            js.push_str(&self.render_to_js(children, &id));
+                            js.push_str("  }\n");
+                        }
+                        js.push_str(&format!("  {}.appendChild({});\n", parent_var, id));
                         continue;
                     }
                     if self.component_names.contains(tag) {
@@ -290,12 +328,42 @@ impl Gen {
                         ));
 
                         // Instantiate component
-                        let ci = &self.comps[comp_idx];
-                        let mut init_props: Vec<String> = ci.static_props.iter()
+                        let static_props: Vec<(String, String)> = self.comps[comp_idx].static_props.clone();
+                        let dynamic_props: Vec<(String, String)> = self.comps[comp_idx].dynamic_props.clone();
+                        let mut init_props: Vec<String> = static_props.iter()
                             .map(|(k, v)| format!("{}: \"{}\"", k, v))
                             .collect();
-                        for (k, e) in &ci.dynamic_props {
-                            init_props.push(format!("{}: {}", k, wrap_val(e)));
+                        for (k, e) in &dynamic_props {
+                            init_props.push(format!("{}: {}", k, self.wrap_val(e)));
+                        }
+
+                        // Compile children into named slots
+                        if !children.is_empty() {
+                            let slots_var = format!("__slots_{}", comp_idx);
+                            js.push_str(&format!("  const {} = {{}};\n", slots_var));
+
+                            let mut slot_groups: std::collections::HashMap<String, Vec<Node>> = std::collections::HashMap::new();
+                            for child in children.iter() {
+                                let slot_name = match child {
+                                    Node::Element { attrs, .. } => {
+                                        attrs.iter().find_map(|a| {
+                                            if a.name == "slot" {
+                                                if let AttrValue::Static(v) = &a.value { Some(v.clone()) } else { None }
+                                            } else { None }
+                                        }).unwrap_or("default".to_string())
+                                    }
+                                    _ => "default".to_string()
+                                };
+                                slot_groups.entry(slot_name).or_default().push(child.clone());
+                            }
+
+                            for (slot_name, slot_children) in &slot_groups {
+                                let frag_var = self.next_id();
+                                js.push_str(&format!("  const {} = document.createDocumentFragment();\n", frag_var));
+                                js.push_str(&self.render_to_js(slot_children, &frag_var));
+                                js.push_str(&format!("  {}['{}'] = {};\n", slots_var, slot_name, frag_var));
+                            }
+                            init_props.push(format!("__slots: {}", slots_var));
                         }
 
                         js.push_str(&format!(
@@ -303,9 +371,9 @@ impl Gen {
                             comp_idx, tag, init_props.join(", "), comp_idx, id
                         ));
 
-                        if !ci.dynamic_props.is_empty() {
-                            let updates: Vec<String> = ci.dynamic_props.iter()
-                                .map(|(k, e)| format!("{}: {}", k, wrap_val(e)))
+                        if !dynamic_props.is_empty() {
+                            let updates: Vec<String> = dynamic_props.iter()
+                                .map(|(k, e)| format!("{}: {}", k, self.wrap_val(e)))
                                 .collect();
                             js.push_str(&format!(
                                 "  effect(() => {{\n    if (__cmp{}) __cmp{}.update({{ {} }});\n  }});\n",
@@ -325,7 +393,7 @@ impl Gen {
                                 AttrValue::Dynamic(e) => {
                                     js.push_str(&format!(
                                         "  effect(() => {{ {}.setAttribute('{}', {}); }});\n",
-                                        id, a.name, wrap_val(e)
+                                        id, a.name, self.wrap_val(e)
                                     ));
                                 }
                                 AttrValue::Event(ev, handler) => {
@@ -338,13 +406,13 @@ impl Gen {
                                 AttrValue::Bind(prop, expr) => {
                                     js.push_str(&format!(
                                         "  {}.{} = {};\n  {}.addEventListener('input', () => {{ {}.val = {}.{}; }});\n  effect(() => {{ {}.{} = {}.val; }});\n",
-                                        id, prop, wrap_val(expr), id, expr, id, prop, id, prop, expr
+                                        id, prop, self.wrap_val(expr), id, expr, id, prop, id, prop, expr
                                     ));
                                 }
                                 AttrValue::ClassToggle(class_name, expr) => {
                                     js.push_str(&format!(
                                         "  effect(() => {{ {}.classList.toggle('{}', {}); }});\n",
-                                        id, class_name, wrap_val(expr)
+                                        id, class_name, self.wrap_val(expr)
                                     ));
                                 }
                             }
@@ -365,7 +433,7 @@ impl Gen {
                 Node::Expr(e) => {
                     js.push_str(&format!(
                         "  const {} = document.createTextNode('');\n  {}.appendChild({});\n  effect(() => {{ {}.textContent = {}; }});\n",
-                        id, parent_var, id, id, wrap_val(e)
+                        id, parent_var, id, id, self.wrap_val(e)
                     ));
                 }
                 Node::IfBlock { branches, fallback } => {
@@ -381,7 +449,7 @@ impl Gen {
                     
                     for (bi, (cond, body)) in branches.iter().enumerate() {
                         let branch_var = format!("__b{}", bi);
-                        let cond_val = wrap_val(cond);
+                        let cond_val = self.wrap_val(cond);
                         if bi == 0 {
                             js.push_str(&format!(
                                 "    if ({}) {{\n", cond_val));
@@ -420,13 +488,13 @@ impl Gen {
                 }
                 Node::EachBlock { list, item, index, key, body } => {
                     let each_idx = self.eachs.len();
-                    let list_expr = wrap_val(list);
+                    let list_expr = self.wrap_val(list);
                     let destructure = match index {
                         Some(ref idx_var) => format!("{{ item: {}, index: {} }}", item, idx_var),
                         None => format!("{{ item: {} }}", item),
                     };
                     let key_fn = match key {
-                        Some(ref k) => format!("(item, i) => {}", wrap_val(k)),
+                        Some(ref k) => format!("(item, i) => {}", self.wrap_val(k)),
                         None => "(item, i) => i".to_string(),
                     };
                     
@@ -444,7 +512,7 @@ impl Gen {
                     let prev_each = self.current_each;
                     self.current_each = Some(each_idx);
                     
-                    let create_body_js = self.render_each_create_js(body, item, index.as_deref());
+                    let (create_body_js, _) = self.render_each_create_js(body, item, index.as_deref());
                     let init_body_js = self.render_each_init_js(&self.eachs[each_idx], item, index.as_deref());
                     
                     self.current_each = prev_each;
@@ -454,18 +522,87 @@ impl Gen {
                         each_idx, id, list_expr, key_fn, destructure, create_body_js, init_body_js
                     ));
                 }
+                Node::AwaitBlock { promise, loading, success, error } => {
+                    let await_idx = self.ifs.len();
+                    let state_sig = format!("__await_state{}", await_idx);
+                    
+                    js.push_str(&format!(
+                        "  const {} = signal({{ status: 'loading' }});\n",
+                        state_sig
+                    ));
+                    
+                    let promise_expr = self.wrap_val(promise);
+                    js.push_str(&format!(
+                        "  effect(() => {{\n    const p = {};\n    if (p && typeof p.then === 'function') {{\n      {}.val = {{ status: 'loading' }};\n      p.then(val => {}.val = {{ status: 'success', val }})\n       .catch(err => {}.val = {{ status: 'error', err }});\n    }} else {{\n      {}.val = {{ status: 'success', val: p }};\n    }}\n  }});\n",
+                        promise_expr, state_sig, state_sig, state_sig, state_sig
+                    ));
+                    
+                    let wrapper_id = format!("_await_n{}", await_idx);
+                    js.push_str(&format!(
+                        "  const {} = document.createComment('zippy-await-{}');\n  {}.appendChild({});\n",
+                        wrapper_id, await_idx, parent_var, wrapper_id
+                    ));
+                    
+                    js.push_str(&format!(
+                        "  let __await_current_branch{} = -1;\n  effect(() => {{\n", wrapper_id));
+                    
+                    js.push_str(&format!(
+                        "    if ({}.val.status === 'loading') {{\n", state_sig));
+                    js.push_str(&format!(
+                        "      if (__await_current_branch{} !== 0) {{\n        clearAfter({});\n        const __b0 = document.createDocumentFragment();\n", wrapper_id, wrapper_id));
+                    js.push_str(&self.render_to_js(loading, "__b0"));
+                    js.push_str(&format!(
+                        "        {}.appendChild(__b0);\n        __await_current_branch{} = 0;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                        
+                    let (val_name, success_body) = success;
+                    js.push_str(&format!(
+                        "    else if ({}.val.status === 'success') {{\n", state_sig));
+                    js.push_str(&format!(
+                        "      if (__await_current_branch{} !== 1) {{\n        clearAfter({});\n        const __b1 = document.createDocumentFragment();\n", wrapper_id, wrapper_id));
+                    if !val_name.is_empty() {
+                        js.push_str(&format!("        const {} = {}.val.val;\n", val_name, state_sig));
+                        self.plain_vars.insert(val_name.clone());
+                    }
+                    js.push_str(&self.render_to_js(success_body, "__b1"));
+                    if !val_name.is_empty() {
+                        self.plain_vars.remove(val_name);
+                    }
+                    js.push_str(&format!(
+                        "        {}.appendChild(__b1);\n        __await_current_branch{} = 1;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                        
+                    if let Some((err_name, error_body)) = error {
+                        js.push_str(&format!(
+                            "    else if ({}.val.status === 'error') {{\n", state_sig));
+                        js.push_str(&format!(
+                            "      if (__await_current_branch{} !== 2) {{\n        clearAfter({});\n        const __b2 = document.createDocumentFragment();\n", wrapper_id, wrapper_id));
+                        if !err_name.is_empty() {
+                            js.push_str(&format!("        const {} = {}.val.err;\n", err_name, state_sig));
+                            self.plain_vars.insert(err_name.clone());
+                        }
+                        js.push_str(&self.render_to_js(error_body, "__b2"));
+                        if !err_name.is_empty() {
+                            self.plain_vars.remove(err_name);
+                        }
+                        js.push_str(&format!(
+                            "        {}.appendChild(__b2);\n        __await_current_branch{} = 2;\n      }}\n    }}\n", wrapper_id, wrapper_id));
+                    }
+                    
+                    js.push_str("  });\n");
+                }
 
             }
         }
         js
     }
 
-    fn render_each_create_js(&mut self, nodes: &[Node], item_var: &str, index_var: Option<&str>) -> String {
+    fn render_each_create_js(&mut self, nodes: &[Node], item_var: &str, index_var: Option<&str>) -> (String, Vec<String>) {
         let mut js = String::new();
         let each_idx = self.current_each.unwrap();
+        let mut child_ids: Vec<String> = Vec::new();
 
-        for (i, n) in nodes.iter().enumerate() {
-            let id = format!("      _ei{}", i);
+        for n in nodes.iter() {
+            let id = self.next_id();
+            child_ids.push(id.clone());
             match n {
                 Node::Element { tag, attrs, children } => {
                     js.push_str(&format!("      const {} = document.createElement('{}');\n", id, tag));
@@ -497,10 +634,10 @@ impl Gen {
                         }
                     }
                     if !children.is_empty() {
-                        js.push_str(&self.render_each_create_js(children, item_var, index_var));
-                        // Child elements append logic
-                        for (ci, _) in children.iter().enumerate() {
-                            js.push_str(&format!("      {}.appendChild(_ei{});\n", id, ci));
+                        let (child_js, grandchildren_ids) = self.render_each_create_js(children, item_var, index_var);
+                        js.push_str(&child_js);
+                        for gc_id in grandchildren_ids {
+                            js.push_str(&format!("      {}.appendChild({});\n", id, gc_id));
                         }
                     }
                 }
@@ -518,7 +655,7 @@ impl Gen {
                 _ => {}
             }
         }
-        js
+        (js, child_ids)
     }
 
     fn render_each_init_js(&self, info: &EachInfo, item_var: &str, index_var: Option<&str>) -> String {
@@ -536,7 +673,7 @@ impl Gen {
             let val = if expr == item_var || index_var.map(|v| v == expr).unwrap_or(false) {
                 expr.clone()
             } else {
-                wrap_val(expr)
+                self.wrap_val(expr)
             };
 
             js.push_str(&format!(
@@ -558,7 +695,7 @@ impl Gen {
         }
 
         for (idx, (prop, expr)) in info.binds.iter().enumerate() {
-            let val = wrap_val(expr);
+            let val = self.wrap_val(expr);
             js.push_str(&format!(
                 "      const __bind{0} = el.querySelector('[data-zippy-bind-each-{0}]');\n      \
                  if (__bind{0}) {{\n        \
@@ -571,7 +708,7 @@ impl Gen {
         }
 
         for (idx, (class_name, expr)) in info.toggles.iter().enumerate() {
-            let val = wrap_val(expr);
+            let val = self.wrap_val(expr);
             js.push_str(&format!(
                 "      const __toggle{0} = el.querySelector('[data-zippy-toggle-each-{0}]');\n      \
                  if (__toggle{0}) {{\n        \

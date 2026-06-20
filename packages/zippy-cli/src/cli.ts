@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from "child_process";
-import { join, relative, dirname } from "path";
-import { readdirSync, existsSync, mkdirSync, statSync, copyFileSync } from "fs";
+import { join, relative, dirname, basename } from "path";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, copyFileSync, unlinkSync } from "fs";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -29,6 +29,11 @@ Usage:
 
 async function build(dir: string) {
   const outDir = "dist";
+  if (existsSync(outDir)) {
+    for (const f of walk(outDir)) {
+      try { unlinkSync(f); } catch {}
+    }
+  }
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
   const entries = walk(dir);
@@ -59,7 +64,6 @@ async function build(dir: string) {
     }
   }
 
-  // Copy non-zippy assets
   for (const file of entries) {
     if (file.endsWith(".zippy")) continue;
     const rel = relative(dir, file);
@@ -69,15 +73,53 @@ async function build(dir: string) {
     copyFileSync(file, outFile);
   }
 
-  // Bundle with bun
-  console.log("\n Bundling...");
-  const bundle = spawnSync("bun", ["build", `./${outDir}/index.js`, "--outdir", outDir, "--minify"], { stdio: "inherit" });
+  const entryPoint = findEntryPoint(dir, outDir);
+  if (!entryPoint) {
+    console.error(" Could not find entry point. Looked for index.html script tag or App.js/index.js");
+    process.exit(1);
+  }
+
+  console.log(`\n Bundling ${entryPoint}...`);
+  const bundle = spawnSync("bun", ["build", entryPoint, "--outdir", outDir, "--minify"], { stdio: "inherit" });
   if (bundle.status !== 0) {
     console.error(" Bundle failed");
     process.exit(1);
   }
 
+  const htmlPath = join(outDir, "index.html");
+  if (existsSync(htmlPath)) {
+    let html = readFileSync(htmlPath, "utf-8");
+    const bundledName = basename(entryPoint).replace(/\.js$/, ".js");
+    html = html.replace(
+      /<script[^>]*src="[^"]*"[^>]*><\/script>/g,
+      `<script type="module" src="./${bundledName}"></script>`
+    );
+    writeFileSync(htmlPath, html);
+    console.log(` Rewrote index.html -> ./${bundledName}`);
+  }
+
   console.log("\n Build complete!");
+}
+
+function findEntryPoint(srcDir: string, outDir: string): string | null {
+  const htmlPath = join(srcDir, "index.html");
+  if (existsSync(htmlPath)) {
+    const html = readFileSync(htmlPath, "utf-8");
+    const matches = html.matchAll(/<script[^>]*src="([^"]+)"/g);
+    for (const m of matches) {
+      let src = m[1];
+      if (src.includes("://") || !src.endsWith(".js")) continue;
+      const filename = basename(src);
+      const distFiles = walk(outDir);
+      const found = distFiles.find(f => f.endsWith(filename));
+      if (found && existsSync(found)) return found;
+    }
+  }
+
+  const distFiles = walk(outDir);
+  const fallback = distFiles.find(f => f.endsWith("index.js"))
+    || distFiles.find(f => f.endsWith("App.js"));
+  return fallback || null;
 }
 
 function walk(dir: string): string[] {

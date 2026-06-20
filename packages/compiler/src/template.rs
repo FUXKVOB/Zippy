@@ -49,7 +49,7 @@ impl<'a> Stream<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Node {
     Element {
         tag: String,
@@ -69,15 +69,21 @@ pub enum Node {
         key: Option<String>,
         body: Vec<Node>,
     },
+    AwaitBlock {
+        promise: String,
+        loading: Vec<Node>,
+        success: (String, Vec<Node>),
+        error: Option<(String, Vec<Node>)>,
+    },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Attr {
     pub name: String,
     pub value: AttrValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AttrValue {
     Static(String),
     Dynamic(String),
@@ -132,46 +138,48 @@ fn parse_nodes(stream: &mut Stream, closing: &[&str]) -> Result<Vec<Node>, Strin
                     nodes.push(parse_element(stream)?);
                 }
             }
-            Some('{') => {
-                let saved = stream.clone();
-                stream.next();
-                match stream.peek() {
-                    Some('#') => {
-                        stream.next();
-                        let mut kw = String::new();
-                        while let Some(c) = stream.peek() {
-                            if c == ' ' || c == '}' { break; }
-                            kw.push(c); stream.next();
-                        }
-                        match kw.as_str() {
-                            "if" => nodes.push(parse_if_block(stream)?),
-                            "each" => nodes.push(parse_each_block(stream)?),
-                            _ => return Err(stream.err(&format!("Unknown block: #{}", kw))),
-                        }
-                    }
-                    Some(':') => {
-                        *stream = saved;
-                        break;
-                    }
-                    Some('/') => {
-                        *stream = saved;
-                        break;
-                    }
-                    _ => {
-                        let mut expr = String::new();
-                        let mut depth = 1;
-                        while let Some(c) = stream.next() {
-                            match c {
-                                '{' => depth += 1,
-                                '}' => { depth -= 1; if depth == 0 { break; } }
-                                c => expr.push(c),
+                Some('{') => {
+                    let saved = stream.clone();
+                    stream.next();
+                    match stream.peek() {
+                        Some('#') => {
+                            stream.next();
+                            let mut kw = String::new();
+                            while let Some(c) = stream.peek() {
+                                if c == ' ' || c == '}' { break; }
+                                kw.push(c); stream.next();
+                            }
+                            match kw.as_str() {
+                                "if" => nodes.push(parse_if_block(stream)?),
+                                "each" => nodes.push(parse_each_block(stream)?),
+                                "await" => nodes.push(parse_await_block(stream)?),
+                                _ => return Err(stream.err(&format!("Unknown block: #{}", kw))),
                             }
                         }
-                        if depth != 0 { return Err(stream.err("Unclosed {")); }
-                        nodes.push(Node::Expr(expr.trim().into()));
+                        Some(':') => {
+                            *stream = saved;
+                            break;
+                        }
+                        Some('/') => {
+                            *stream = saved;
+                            break;
+                        }
+                        _ => {
+                            let mut expr = String::new();
+                            let mut depth = 1;
+                            while let Some(c) = stream.next() {
+                                match c {
+                                    '{' => depth += 1,
+                                    '}' => { depth -= 1; if depth == 0 { break; } }
+                                    c => expr.push(c),
+                                }
+                            }
+                            if depth != 0 { return Err(stream.err("Unclosed {")); }
+                            nodes.push(Node::Expr(expr.trim().into()));
+                        }
                     }
                 }
-            }
+
             Some(_) => {
                 nodes.push(parse_text(stream));
             }
@@ -414,6 +422,89 @@ fn parse_text(stream: &mut Stream) -> Node {
 
 fn is_void(tag: &str) -> bool {
     matches!(tag, "br" | "hr" | "img" | "input" | "meta" | "link" | "area" | "base" | "col" | "embed" | "source" | "track" | "wbr")
+}
+
+fn parse_await_block(stream: &mut Stream) -> Result<Node, String> {
+    stream.skip_ws();
+    let mut promise = String::new();
+    while let Some(c) = stream.peek() {
+        if c == '}' { stream.next(); break; }
+        promise.push(c); stream.next();
+    }
+    
+    let loading = parse_nodes(stream, &[":then", ":catch", "/await"])?;
+    
+    // Parse {:then varname}
+    if stream.peek() != Some('{') { return Err(stream.err("Expected {:then}")); }
+    stream.next();
+    if stream.peek() != Some(':') { return Err(stream.err("Expected :then")); }
+    stream.next();
+    // Read keyword (then)
+    let mut kw = String::new();
+    while let Some(c) = stream.peek() {
+        if c == ' ' || c == '}' { break; }
+        kw.push(c); stream.next();
+    }
+    if kw.trim() != "then" { return Err(stream.err(&format!("Expected 'then', got '{}'", kw))); }
+    // Read optional var name
+    stream.skip_ws();
+    let mut val_name = String::new();
+    while let Some(c) = stream.peek() {
+        if c == '}' { stream.next(); break; }
+        val_name.push(c); stream.next();
+    }
+    let val_name = val_name.trim().to_string();
+    let success_body = parse_nodes(stream, &[":catch", "/await"])?;
+    
+    // Parse optional {:catch varname}
+    let mut error = None;
+    if stream.peek() == Some('{') {
+        stream.next();
+        if stream.peek() == Some(':') {
+            stream.next();
+            // Read keyword (catch)
+            let mut kw = String::new();
+            while let Some(c) = stream.peek() {
+                if c == ' ' || c == '}' { break; }
+                kw.push(c); stream.next();
+            }
+            if kw.trim() == "catch" {
+                stream.skip_ws();
+                let mut err_name = String::new();
+                while let Some(c) = stream.peek() {
+                    if c == '}' { stream.next(); break; }
+                    err_name.push(c); stream.next();
+                }
+                let error_body = parse_nodes(stream, &["/await"])?;
+                error = Some((err_name.trim().to_string(), error_body));
+            } else {
+                return Err(stream.err(&format!("Expected 'catch', got '{}'", kw)));
+            }
+        } else {
+            return Err(stream.err("Expected :catch or {/await}"));
+        }
+    }
+
+    // Parse {/await}
+    if stream.peek() == Some('{') {
+        stream.next();
+        if stream.peek() == Some('/') {
+            stream.next();
+            let mut end = String::new();
+            while let Some(c) = stream.peek() {
+                if c == '}' { stream.next(); break; }
+                end.push(c); stream.next();
+            }
+            if end.trim() != "await" { return Err(stream.err("Expected {/await}")); }
+        }
+    }
+
+    Ok(Node::AwaitBlock { 
+        promise: promise.trim().to_string(), 
+        loading, 
+        success: (val_name, success_body), 
+        error 
+    })
 }
 
 #[cfg(test)]

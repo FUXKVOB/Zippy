@@ -1,0 +1,24 @@
+<script>
+  // Card component with named slots: header, default, footer
+</script>
+
+<style>
+  .card { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin: 12px 0; }
+  .card-header { background: #f5f5f5; padding: 12px; font-weight: bold; border-bottom: 1px solid #ddd; }
+  .card-body { padding: 16px; }
+  .card-footer { background: #f5f5f5; padding: 8px 12px; border-top: 1px solid #ddd; font-size: 0.85em; color: #666; }
+</style>
+
+<template>
+  <div class="card">
+    <div class="card-header">
+      <slot name="header">Default Header</slot>
+    </div>
+    <div class="card-body">
+      <slot>Default body content</slot>
+    </div>
+    <div class="card-footer">
+      <slot name="footer">Default Footer</slot>
+    </div>
+  </div>
+</template>

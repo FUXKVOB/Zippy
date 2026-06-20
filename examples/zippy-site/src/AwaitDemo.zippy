@@ -1,0 +1,46 @@
+<script>
+  let dataPromise = signal(null);
+
+  function fetchData() {
+    dataPromise.val = new Promise((resolve, reject) => {
+      setTimeout(() => {
+        if (Math.random() > 0.3) {
+          resolve({ title: "Loaded successfully!", items: ["Apple", "Banana", "Cherry"] });
+        } else {
+          reject("Failed to fetch data. Try again.");
+        }
+      }, 1500);
+    });
+  }
+
+  onMount(() => fetchData());
+</script>
+
+<style>
+  .await-demo { padding: 16px; border: 1px solid #ddd; border-radius: 8px; margin-top: 16px; }
+  .loading { color: #646cff; }
+  .success { color: #42b883; }
+  .error { color: #e34c4c; }
+  button { margin-bottom: 12px; padding: 6px 14px; cursor: pointer; }
+  ul { margin: 8px 0; }
+</style>
+
+<template>
+  <div class="await-demo">
+    <button @click={() => fetchData()}>Reload Data</button>
+    {#await dataPromise}
+      <p class="loading">Loading...</p>
+    {:then res}
+      <div class="success">
+        <h3>{res.title}</h3>
+        <ul>
+          {#each res.items as item}
+            <li>{item}</li>
+          {/each}
+        </ul>
+      </div>
+    {:catch err}
+      <p class="error">{err}</p>
+    {/await}
+  </div>
+</template>
