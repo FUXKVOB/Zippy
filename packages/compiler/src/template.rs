@@ -33,6 +33,7 @@ pub enum AttrValue {
     Static(String),
     Dynamic(String),
     Event(String, String),
+    Bind(String, String), // bind:prop={expr}
 }
 
 pub fn parse_template(source: &str) -> Result<Vec<Node>, String> {
@@ -170,6 +171,18 @@ fn parse_attr(chars: &mut Peekable<Chars>) -> Result<Attr, String> {
             return Err("@event needs {{handler}}".into());
         }
         return Err(format!("@{} requires ={{fn}}", event_name));
+    }
+
+    if name.starts_with("bind:") {
+        let prop = name[5..].to_string();
+        skip_ws(chars);
+        if chars.peek() == Some(&'=') {
+            chars.next();
+            if let AttrValue::Dynamic(expr) = parse_attr_value(chars) {
+                return Ok(Attr { name, value: AttrValue::Bind(prop, expr) });
+            }
+        }
+        return Err(format!("bind:{} requires ={{expr}}", prop));
     }
 
     skip_ws(chars);
@@ -354,4 +367,216 @@ fn skip_ws(chars: &mut Peekable<Chars>) {
 
 fn is_void(tag: &str) -> bool {
     matches!(tag, "br" | "hr" | "img" | "input" | "meta" | "link" | "area" | "base" | "col" | "embed" | "source" | "track" | "wbr")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_simple_element() {
+        let nodes = parse_template("<div></div>").unwrap();
+        assert_eq!(nodes.len(), 1);
+        match &nodes[0] {
+            Node::Element { tag, attrs, children } => {
+                assert_eq!(tag, "div");
+                assert!(attrs.is_empty());
+                assert!(children.is_empty());
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_element_with_text() {
+        let nodes = parse_template("<p>hello</p>").unwrap();
+        match &nodes[0] {
+            Node::Element { tag, children, .. } => {
+                assert_eq!(tag, "p");
+                assert_eq!(children.len(), 1);
+                match &children[0] {
+                    Node::Text(t) => assert_eq!(t, "hello"),
+                    _ => panic!("expected Text"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_expression() {
+        let nodes = parse_template("<span>{count}</span>").unwrap();
+        match &nodes[0] {
+            Node::Element { children, .. } => {
+                match &children[0] {
+                    Node::Expr(e) => assert_eq!(e, "count"),
+                    _ => panic!("expected Expr"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_static_attr() {
+        let nodes = parse_template(r#"<div class="foo"></div>"#).unwrap();
+        match &nodes[0] {
+            Node::Element { attrs, .. } => {
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0].name, "class");
+                match &attrs[0].value {
+                    AttrValue::Static(v) => assert_eq!(v, "foo"),
+                    _ => panic!("expected Static"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_dynamic_attr() {
+        let nodes = parse_template("<div class={name}></div>").unwrap();
+        match &nodes[0] {
+            Node::Element { attrs, .. } => {
+                assert_eq!(attrs[0].name, "class");
+                match &attrs[0].value {
+                    AttrValue::Dynamic(e) => assert_eq!(e, "name"),
+                    _ => panic!("expected Dynamic"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_event_attr() {
+        let nodes = parse_template("<button @click={fn}></button>").unwrap();
+        match &nodes[0] {
+            Node::Element { attrs, .. } => {
+                match &attrs[0].value {
+                    AttrValue::Event(ev, handler) => {
+                        assert_eq!(ev, "click");
+                        assert_eq!(handler, "fn");
+                    }
+                    _ => panic!("expected Event"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_bind_attr() {
+        let nodes = parse_template("<input bind:value={x} />").unwrap();
+        match &nodes[0] {
+            Node::Element { tag, attrs, .. } => {
+                assert_eq!(tag, "input");
+                match &attrs[0].value {
+                    AttrValue::Bind(prop, expr) => {
+                        assert_eq!(prop, "value");
+                        assert_eq!(expr, "x");
+                    }
+                    _ => panic!("expected Bind"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_self_closing() {
+        let nodes = parse_template("<br /><hr />").unwrap();
+        assert_eq!(nodes.len(), 2);
+        for n in &nodes {
+            match n {
+                Node::Element { children, .. } => assert!(children.is_empty()),
+                _ => panic!("expected Element"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_if_block() {
+        let nodes = parse_template("{#if show}<p>hi</p>{/if}").unwrap();
+        assert_eq!(nodes.len(), 1);
+        match &nodes[0] {
+            Node::IfBlock { branches, fallback } => {
+                assert_eq!(branches.len(), 1);
+                assert_eq!(branches[0].0, "show");
+                assert!(fallback.is_empty());
+            }
+            _ => panic!("expected IfBlock"),
+        }
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let nodes = parse_template("{#if a}<p>a</p>{:else}<p>b</p>{/if}").unwrap();
+        match &nodes[0] {
+            Node::IfBlock { branches, fallback } => {
+                assert_eq!(branches.len(), 1);
+                assert!(!fallback.is_empty());
+            }
+            _ => panic!("expected IfBlock"),
+        }
+    }
+
+    #[test]
+    fn parse_each_block() {
+        let nodes = parse_template("{#each items as item}<li>{item}</li>{/each}").unwrap();
+        match &nodes[0] {
+            Node::EachBlock { list, item, index, .. } => {
+                assert_eq!(list, "items");
+                assert_eq!(item, "item");
+                assert!(index.is_none());
+            }
+            _ => panic!("expected EachBlock"),
+        }
+    }
+
+    #[test]
+    fn parse_each_with_index() {
+        let nodes = parse_template("{#each items as item, i}<li>{i}: {item}</li>{/each}").unwrap();
+        match &nodes[0] {
+            Node::EachBlock { list, item, index, .. } => {
+                assert_eq!(list, "items");
+                assert_eq!(item, "item");
+                assert_eq!(index.as_deref(), Some("i"));
+            }
+            _ => panic!("expected EachBlock"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_elements() {
+        let nodes = parse_template("<ul><li>a</li><li>b</li></ul>").unwrap();
+        match &nodes[0] {
+            Node::Element { tag, children, .. } => {
+                assert_eq!(tag, "ul");
+                assert_eq!(children.len(), 2);
+                match &children[0] {
+                    Node::Element { tag, .. } => assert_eq!(tag, "li"),
+                    _ => panic!("expected Element"),
+                }
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_attrs() {
+        let nodes = parse_template(r#"<div class="x" id={y} @click={z}></div>"#).unwrap();
+        match &nodes[0] {
+            Node::Element { attrs, .. } => {
+                assert_eq!(attrs.len(), 3);
+            }
+            _ => panic!("expected Element"),
+        }
+    }
+
+    #[test]
+    fn parse_error_unclosed_expr() {
+        let result = parse_template("<p>{unclosed</p>");
+        assert!(result.is_err());
+    }
 }

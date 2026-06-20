@@ -7,7 +7,7 @@ pub fn generate(script: &str, template: &str, style: &str) -> String {
     let scoped_style = scope_css(style, &hash);
     let mut gen = Gen::new(&info.names, &hash);
 
-    let root_html = gen.render(&nodes, true);
+    let root_html = gen.render(&nodes, Mode::Normal);
 
     format!(
 r#"{imports}
@@ -118,6 +118,9 @@ fn scope_css(css: &str, hash: &str) -> String {
     out
 }
 
+#[derive(Clone, Copy)]
+enum Mode { Normal, Inline, Raw }
+
 fn is_ident(s: &str) -> bool {
     if s.is_empty() { return false; }
     let first = s.chars().next().unwrap();
@@ -141,6 +144,7 @@ struct Gen {
     component_names: Vec<String>,
     hash: String,
     events: Vec<(String, String)>,
+    binds: Vec<(String, String)>,
     exprs: Vec<String>,
     comps: Vec<CompInfo>,
     ifs: Vec<IfInfo>,
@@ -172,6 +176,7 @@ impl Gen {
             component_names: component_names.to_vec(),
             hash: hash.to_string(),
             events: Vec::new(),
+            binds: Vec::new(),
             exprs: Vec::new(),
             comps: Vec::new(),
             ifs: Vec::new(),
@@ -179,10 +184,11 @@ impl Gen {
         }
     }
 
-    /// Render AST to HTML string. When `marker` is true, expressions become
-    /// `<span data-zippy-expr="N">` and are wired reactively. When false,
-    /// expressions are inlined as `${{expr}.val}` (used inside #each bodies).
-    fn render(&mut self, nodes: &[Node], marker: bool) -> String {
+    /// Render AST to HTML string.
+    /// - `Normal`: expressions → `<span data-zippy-expr="N">` + effects
+    /// - `Inline`: expressions → `${{expr}.val}` (dynamic attrs)
+    /// - `Raw`:    expressions → `${{expr}}`  (each body — loop vars are plain values)
+    fn render(&mut self, nodes: &[Node], mode: Mode) -> String {
         let mut html = String::new();
 
         for n in nodes {
@@ -199,6 +205,7 @@ impl Gen {
                                 AttrValue::Static(v) => ci.static_props.push((a.name.clone(), v.clone())),
                                 AttrValue::Dynamic(e) => ci.dynamic_props.push((a.name.clone(), e.clone())),
                                 AttrValue::Event(_, _) => {}
+                                AttrValue::Bind(_, _) => {} // bind on components not yet supported
                             }
                         }
                         let idx = self.comps.len();
@@ -219,13 +226,18 @@ impl Gen {
                                     self.events.push((ev.clone(), handler.clone()));
                                     html.push_str(&format!(" data-zippy-evt{}", ei));
                                 }
+                                AttrValue::Bind(prop, expr) => {
+                                    let bi = self.binds.len();
+                                    self.binds.push((prop.clone(), expr.clone()));
+                                    html.push_str(&format!(" data-zippy-bind=\"{}\"", bi));
+                                }
                             }
                         }
                         if children.is_empty() && is_void(tag) {
                             html.push_str(" />");
                         } else {
                             html.push('>');
-                            html.push_str(&self.render(children, marker));
+                            html.push_str(&self.render(children, mode));
                             html.push_str("</");
                             html.push_str(tag);
                             html.push('>');
@@ -234,12 +246,14 @@ impl Gen {
                 }
                 Node::Text(t) => html.push_str(t),
                 Node::Expr(e) => {
-                    if marker {
-                        let ei = self.exprs.len();
-                        self.exprs.push(e.clone());
-                        html.push_str(&format!("<span data-zippy-expr=\"{}\"></span>", ei));
-                    } else {
-                        html.push_str(&format!("${{{}}}", wrap_val(e)));
+                    match mode {
+                        Mode::Normal => {
+                            let ei = self.exprs.len();
+                            self.exprs.push(e.clone());
+                            html.push_str(&format!("<span data-zippy-expr=\"{}\"></span>", ei));
+                        }
+                        Mode::Inline => html.push_str(&format!("${{{}}}", wrap_val(e))),
+                        Mode::Raw => html.push_str(&format!("${{{}}}", e)),
                     }
                 }
                 Node::IfBlock { branches, fallback: _ } => {
@@ -248,7 +262,7 @@ impl Gen {
                         expr: branches[0].0.clone(),
                         idx,
                     });
-                    let body_html = self.render(&branches[0].1, marker);
+                    let body_html = self.render(&branches[0].1, mode);
                     html.push_str(&format!(
                         "<!--zippy-if-{}--><div data-zippy-if=\"{}\">{}</div>",
                         idx, idx, body_html
@@ -256,7 +270,7 @@ impl Gen {
                 }
                 Node::EachBlock { list, item, index, body } => {
                     let idx = self.eachs.len();
-                    let body_html = self.render(body, false); // inline expressions
+                    let body_html = self.render(body, Mode::Raw); // loop vars are plain values
                     self.eachs.push(EachInfo {
                         list: list.clone(),
                         item: item.clone(),
@@ -356,6 +370,21 @@ impl Gen {
             ));
         }
 
+        // Bindings
+        for (i, (prop, expr)) in self.binds.iter().enumerate() {
+            code.push_str(&format!(
+                "  const __bind{} = el.querySelector('[data-zippy-bind=\"{}\"]');\n  \
+                 if (__bind{}) {{\n    \
+                   __bind{}.{} = {};\n    \
+                   __bind{}.addEventListener('input', () => {{ {}.val = __bind{}.{}; }});\n    \
+                   effect(() => {{ __bind{}.{} = {}.val; }});\n  \
+                 }}\n",
+                i, i, i, i, prop, wrap_val(expr),
+                i, expr, i, prop,
+                i, prop, expr
+            ));
+        }
+
         // Each blocks
         for info in &self.eachs {
             let idx = info.idx;
@@ -409,4 +438,100 @@ fn render_style(s: &str) -> String {
          document.head.append(__style);",
         s.replace('`', "\\`")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ident() {
+        assert!(is_ident("name"));
+        assert!(is_ident("_foo"));
+        assert!(is_ident("$val"));
+        assert!(!is_ident("5"));
+        assert!(!is_ident("foo.bar"));
+        assert!(!is_ident(""));
+        assert!(!is_ident("123abc"));
+    }
+
+    #[test]
+    fn test_wrap_val() {
+        assert_eq!(wrap_val("count"), "count.val");
+        assert_eq!(wrap_val("5"), "5");
+        assert_eq!(wrap_val("foo.bar"), "foo.bar");
+        assert_eq!(wrap_val("name"), "name.val");
+    }
+
+    #[test]
+    fn test_compute_hash() {
+        let h = compute_hash("hello");
+        assert!(h.len() <= 8);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_generate_basic() {
+        let js = generate(
+            "let count = signal(0);",
+            "<p>{count}</p>",
+            "",
+        );
+        assert!(js.contains("signal"));
+        assert!(js.contains("effect"));
+        assert!(js.contains("data-zippy-expr"));
+        assert!(js.contains("count.val"));
+        assert!(js.contains("export default function ZippyComponent"));
+    }
+
+    #[test]
+    fn test_generate_bind() {
+        let js = generate(
+            "let x = signal('');",
+            "<input bind:value={x} />",
+            "",
+        );
+        assert!(js.contains("data-zippy-bind"));
+        assert!(js.contains("addEventListener('input'"));
+        assert!(js.contains("x.val"));
+    }
+
+    #[test]
+    fn test_generate_each_index() {
+        let js = generate(
+            "let items = signal([1,2,3]);",
+            "{#each items as item, i}<li>{i}: {item}</li>{/each}",
+            "",
+        );
+        // items from each body are rendered Raw (no .val)
+        assert!(js.contains("${i}"));
+        assert!(js.contains("${item}"));
+    }
+
+    #[test]
+    fn test_generate_if() {
+        let js = generate(
+            "let show = signal(true);",
+            "{#if show}<p>visible</p>{/if}",
+            "",
+        );
+        assert!(js.contains("hidden"));
+        assert!(js.contains("show.val"));
+    }
+
+    #[test]
+    fn test_style_scoping() {
+        let scoped = scope_css("h1 { color: red; }", "abc123");
+        assert!(scoped.contains("[data-z-abc123]"));
+        assert!(scoped.contains("h1"));
+    }
+
+    #[test]
+    fn test_extract_imports() {
+        let info = extract_imports("import Foo from './Foo.zippy'\nlet x = 1");
+        assert_eq!(info.names, vec!["Foo"]);
+        assert!(info.imports.contains("Foo"));
+        assert!(info.imports.contains(".js"));
+        assert!(info.body.contains("x = 1"));
+    }
 }

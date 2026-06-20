@@ -1,0 +1,8 @@
+<script>
+  let name = signal("Zippy");
+</script>
+
+<template>
+  <input bind:value={name} />
+  <p>Hello, {name}!</p>
+</template>
